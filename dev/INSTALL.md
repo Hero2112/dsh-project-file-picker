@@ -22,7 +22,7 @@ project-file-picker/
 1. **解压**，把整个 `project-file-picker` 文件夹拷到目标电脑上，建议放：
 
    ```
-   <你的工作区目录>\插件\project-file-picker\releases\v1.1.0
+   <你的工作区目录>\插件\project-file-picker\releases\v1.2.0
    ```
 
    放别处也能用，只要路径固定、之后别移动。

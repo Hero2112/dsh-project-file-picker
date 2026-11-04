@@ -15,8 +15,13 @@ window.__ModuleLoader__.load({
     const SEED_KEY = 'dsh.project-file-picker.seeded';
     /** 文件夹标记按 profile 存：一张以工作目录为根键的 JSON 表。 */
     const TAGS_KEY = 'dsh.project-file-picker.tags.v1';
-    /** 固定的文件 / 文件夹也按 profile 存，同样以工作目录为根键。 */
-    const PINS_KEY = 'dsh.project-file-picker.pins.v1';
+    /**
+     * 固定的文件 / 文件夹：**按对话（会话）各存一套**，互不相关。
+     * 一条记录是 `{ path, kind }`，path 相对该对话的工作目录。
+     */
+    const PINS_KEY = 'dsh.project-file-picker.pins.v3';
+    /** 早期版本按工作目录分组的旧表，首次读取时归到当前对话。 */
+    const LEGACY_PINS_KEY = 'dsh.project-file-picker.pins.v1';
     /** 所有文件地址共用的协议与类型前缀。 */
     const FILE_ADDRESS_PREFIX = 'dsh-resource://file/';
 
@@ -68,6 +73,7 @@ window.__ModuleLoader__.load({
       'pin.unpinned': '已取消固定 {name}',
       'pin.jumped': '已定位到 {name}',
       'pin.empty': '还没有固定的位置，点行上的图钉按钮固定',
+      'pin.localOnly': '固定项只属于当前这个对话，换个对话是另一套',
       'error.notFound': '目录已不存在',
       'error.outsideWorkspace': '目录在工作区之外',
       'error.notDirectory': '这不是一个目录',
@@ -108,6 +114,7 @@ window.__ModuleLoader__.load({
       'pin.unpinned': 'Unpinned {name}',
       'pin.jumped': 'Jumped to {name}',
       'pin.empty': 'Nothing pinned yet — press the pin button on a row',
+      'pin.localOnly': 'Pins belong to this conversation only; other conversations have their own',
       'error.notFound': 'That directory is gone',
       'error.outsideWorkspace': 'That directory is outside the workspace',
       'error.notDirectory': 'That is not a directory',
@@ -298,41 +305,104 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /**
-     * 读取整张固定表：以工作目录为根键，值是 `{ path, kind }` 的数组，
-     * path 是相对工作目录的路径。存储损坏或不存在时按空表处理。
-     */
-    function readPins() {
-      try {
-        const raw = window.localStorage.getItem(PINS_KEY);
-        if (raw === null || raw === undefined || raw === '') return {};
-        const parsed = JSON.parse(raw);
-        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-        const clean = {};
-        for (const root of Object.keys(parsed)) {
-          const list = parsed[root];
-          if (!Array.isArray(list)) continue;
-          const kept = [];
-          for (const item of list) {
-            if (item === null || typeof item !== 'object') continue;
-            if (typeof item.path !== 'string' || item.path === '') continue;
-            kept.push({ path: item.path, kind: item.kind === 'directory' ? 'directory' : 'file' });
-          }
-          if (kept.length > 0) clean[root] = kept;
-        }
-        return clean;
-      } catch (error) {
-        return {};
-      }
+    /** 把一条固定记录收拾成标准形状；缺字段的返回 undefined。 */
+    function normalizePin(item) {
+      if (item === null || typeof item !== 'object') return undefined;
+      if (typeof item.path !== 'string' || item.path === '') return undefined;
+      return {
+        path: posixOf(item.path).replace(/^\/+/, ''),
+        kind: item.kind === 'directory' ? 'directory' : 'file',
+      };
     }
 
-    /** 写回整张固定表；存储被禁用时只是丢了持久化。 */
-    function writePins(pins) {
+    /**
+     * 读取某个对话的固定项。
+     *
+     * 固定项**跟着对话走**：A 对话固定的文件夹只出现在 A 对话里，
+     * B 对话是另一套，互不相关。存的是相对该对话工作目录的路径。
+     *
+     * v3 不存在时，把早期按工作目录分组的旧表里属于当前工作目录的那些
+     * 归到当前对话（只归一次，归完就删旧键），免得旧数据直接丢掉。
+     */
+    function readSessionPins(sessionId, root) {
+      const key = String(sessionId === undefined || sessionId === null ? '' : sessionId);
+      const readMap = () => {
+        try {
+          const raw = window.localStorage.getItem(PINS_KEY);
+          if (raw === null || raw === undefined || raw === '') return {};
+          const parsed = JSON.parse(raw);
+          if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+          return parsed;
+        } catch (error) {
+          return {};
+        }
+      };
+
+      const map = readMap();
+      const list = [];
+      const seen = new Set();
+      const push = (pin) => {
+        if (pin === undefined) return;
+        if (seen.has(pin.path)) return;
+        seen.add(pin.path);
+        list.push(pin);
+      };
+      const stored = map[key];
+      if (Array.isArray(stored)) {
+        for (const item of stored) push(normalizePin(item));
+        return list;
+      }
+
+      // 当前对话还没有自己的表：看看旧表里有没有属于这个工作目录的固定项。
       try {
-        window.localStorage.setItem(PINS_KEY, JSON.stringify(pins));
+        const legacyRaw = window.localStorage.getItem(LEGACY_PINS_KEY);
+        if (legacyRaw !== null && legacyRaw !== undefined && legacyRaw !== '') {
+          const parsed = JSON.parse(legacyRaw);
+          const base = root === undefined || root === null ? '' : posixOf(root).replace(/\/+$/, '');
+          if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) && base !== '') {
+            const items = parsed[base];
+            if (Array.isArray(items)) {
+              for (const item of items) push(normalizePin(item));
+            }
+            if (items !== undefined) {
+              delete parsed[base];
+              try {
+                if (Object.keys(parsed).length === 0) window.localStorage.removeItem(LEGACY_PINS_KEY);
+                else window.localStorage.setItem(LEGACY_PINS_KEY, JSON.stringify(parsed));
+              } catch (error) {
+                /* 清不掉旧键也不影响使用 */
+              }
+            }
+          }
+        }
+      } catch (error) {
+        /* 旧表坏了：当空表 */
+      }
+      if (list.length > 0) {
+        const next = Object.assign({}, map);
+        next[key] = list;
+        writeSessionPins(next);
+      }
+      return list;
+    }
+
+    /** 写回整张固定表（按对话分组的表）；存储被禁用时只是丢了持久化。 */
+    function writeSessionPins(map) {
+      try {
+        window.localStorage.setItem(PINS_KEY, JSON.stringify(map));
       } catch (error) {
         /* 忽略 */
       }
+    }
+
+    /** 两条固定记录是否是同一个位置。 */
+    function samePin(left, right) {
+      return left.path === right.path;
+    }
+
+    /** 固定项的稳定标识：同时用于 React key 和测试里的 data 属性。 */
+    function pinKey(pin) {
+      return pin.path;
     }
 
     /**
@@ -836,7 +906,9 @@ window.__ModuleLoader__.load({
       const [dragging, setDragging] = useState(false);
       const [tags, setTags] = useState(() => readTags());
       const [tagEditor, setTagEditor] = useState(null);
-      const [pins, setPins] = useState(() => readPins());
+      const [pins, setPins] = useState(() => readSessionPins(sessionId, root));
+      /** 防御一句：万一状态被写成别的形状，就按空表用，别整页崩掉。 */
+      const pinList = Array.isArray(pins) ? pins : [];
       const [reveal, setReveal] = useState(null);
 
       const controllers = useRef(new Map());
@@ -922,14 +994,18 @@ window.__ModuleLoader__.load({
         }
       }, [root, expanded, levels]);
 
-      // 固定过的目录，在刷新页面或切换会话后自动展开到那一层，
+      // 固定项是每个对话自己的一套：会话（或工作目录）变了就重新读这一份，
+      // 别的对话的固定项不会串过来。
+      useEffect(() => {
+        setPins(readSessionPins(sessionId, rootRef.current));
+      }, [sessionId, root]);
+
+      // 固定过的目录，在刷新页面或切回这个对话后自动展开到那一层，
       // 这样固定的深目录一打开就是原地状态。
       useEffect(() => {
         if (root === undefined) return;
-        const list = pins[root];
-        if (!Array.isArray(list)) return;
         const wanted = [];
-        for (const pin of list) {
+        for (const pin of pinList) {
           if (pin.kind !== 'directory') continue;
           for (const path of ancestorChain(root, joinPath(root, pin.path))) {
             if (wanted.indexOf(path) < 0) wanted.push(path);
@@ -1058,58 +1134,69 @@ window.__ModuleLoader__.load({
         return record !== undefined && record !== null ? record : undefined;
       };
 
-      /** 当前工作目录下的固定项；顺序就是显示顺序（后固定的在前面）。 */
-      const pinsForRoot = root === undefined
-        ? []
-        : (Array.isArray(pins[root]) ? pins[root] : []);
+      /**
+       * 固定项跟着对话走：这份列表就是当前对话自己的那一套，
+       * 换了对话会重新读另一份，互不相关。
+       */
+      const pinsShown = pinList;
 
-      /** 某个绝对路径是否已被固定。 */
+      /** 某个绝对路径是否已被固定（当前对话的表里有没有它）。 */
       const isPinned = (path) => {
         if (root === undefined) return false;
         const relative = relativeTo(root, path);
         if (relative === '') return false;
-        for (const pin of pinsForRoot) {
+        for (const pin of pinsShown) {
           if (pin.path === relative) return true;
         }
         return false;
       };
 
-      // 固定表同样不可变地整张替换并落盘。
-      const writePinsFor = (list) => {
-        if (root === undefined) return;
-        const next = Object.assign({}, pins);
-        if (list.length === 0) delete next[root];
-        else next[root] = list;
-        setPins(next);
-        writePins(next);
+      // 写固定项：只改当前对话那一格，整张表其余对话的原样保留。
+      const savePins = (list) => {
+        const key = String(sessionId === undefined || sessionId === null ? '' : sessionId);
+        let map = {};
+        try {
+          const raw = window.localStorage.getItem(PINS_KEY);
+          const parsed = raw === null || raw === undefined || raw === '' ? {} : JSON.parse(raw);
+          if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) map = parsed;
+        } catch (error) {
+          map = {};
+        }
+        const next = Object.assign({}, map);
+        if (list.length === 0) delete next[key];
+        else next[key] = list;
+        setPins(list);
+        writeSessionPins(next);
       };
 
       /** 固定 / 取消固定；kind 只在这一行还没被固定时用得上。 */
       const togglePin = (path, kind) => {
-        if (root === undefined) return;
-        const relative = relativeTo(root, path);
+        const base = rootRef.current !== undefined && rootRef.current !== null ? rootRef.current : root;
+        if (base === undefined) return;
+        const relative = relativeTo(base, path);
         if (relative === '') return;
         const name = relative.split('/').pop();
-        const already = pinsForRoot.some((pin) => pin.path === relative);
-        if (already) {
-          writePinsFor(pinsForRoot.filter((pin) => pin.path !== relative));
+        const entry = { path: relative, kind: kind === 'directory' ? 'directory' : 'file' };
+        const current = Array.isArray(pins) ? pins : [];
+        if (current.some((pin) => samePin(pin, entry))) {
+          savePins(current.filter((pin) => !samePin(pin, entry)));
           setStatus({ message: tr('pin.unpinned', { name: name }), error: false });
           return;
         }
-        const entry = { path: relative, kind: kind === 'directory' ? 'directory' : 'file' };
-        writePinsFor([entry].concat(pinsForRoot));
+        savePins([entry].concat(current));
         setStatus({ message: tr('pin.pinned', { name: name }), error: false });
       };
 
-      /** 固定区里的 × 号：按相对路径取消固定。 */
-      const removePin = (relative) => {
-        const name = relative.split('/').pop();
-        writePinsFor(pinsForRoot.filter((pin) => pin.path !== relative));
+      /** 固定区里的 × 号：取消固定这一条。 */
+      const removePin = (pin) => {
+        const name = pin.path.split('/').pop();
+        const current = Array.isArray(pins) ? pins : [];
+        savePins(current.filter((item) => !samePin(item, pin)));
         setStatus({ message: tr('pin.unpinned', { name: name }), error: false });
       };
 
       /**
-       * 点固定区的一行：目录就展开并定位过去，文件就直接插入引用。
+       * 点固定区的一行：目录就展开并定位，文件就直接插入引用。
        * 目录的祖先链要一起展开，否则那一层根本不在树上。
        */
       const openPin = (pin) => {
@@ -1295,24 +1382,26 @@ window.__ModuleLoader__.load({
         });
       }
 
-      // 固定区：把深目录 / 常用文件钉在列表上方，刷新和切会话后都还在。
+      // 固定区：当前对话自己的那一套。刷新页面、切回来都还在，
+      // 但换个对话看到的是另一套，互不相关。
       const pinsSection = h('div', { key: 'pins', className: 'pfp-pins', 'data-pfp-pins': '1' }, [
         h('div', { key: 'head', className: 'pfp-pinsHead' }, [
           h(PinGlyph, { key: 'glyph' }),
-          h('span', { key: 'label' }, tr('pin.section')),
-          h('span', { key: 'count' }, '· ' + pinsForRoot.length),
+          h('span', { key: 'label', title: tr('pin.localOnly') }, tr('pin.section')),
+          h('span', { key: 'count', title: tr('pin.localOnly') }, '· ' + pinsShown.length),
         ]),
-        pinsForRoot.length === 0
+        pinsShown.length === 0
           ? h('p', { key: 'empty', className: 'pfp-note', style: { padding: '2px 0' } }, tr('pin.empty'))
-          : h('ul', { key: 'list', className: 'pfp-pinList' }, pinsForRoot.map((pin) => {
+          : h('ul', { key: 'list', className: 'pfp-pinList' }, pinsShown.map((pin) => {
             const name = pin.path.split('/').pop();
-            return h('li', { key: pin.path, className: 'pfp-pinItem' }, [
+            const identity = pinKey(pin);
+            return h('li', { key: identity, className: 'pfp-pinItem' }, [
               h('button', {
                 key: 'main',
                 type: 'button',
                 className: 'pfp-pinMain',
                 title: pin.path,
-                'data-pfp-pin-open': pin.path,
+                'data-pfp-pin-open': identity,
                 onClick: () => openPin(pin),
               }, [
                 pin.kind === 'directory'
@@ -1327,10 +1416,10 @@ window.__ModuleLoader__.load({
                 className: 'pfp-pinRemove',
                 title: tr('pin.unpin'),
                 'aria-label': tr('pin.unpin'),
-                'data-pfp-pin-remove': pin.path,
+                'data-pfp-pin-remove': identity,
                 onClick: (event) => {
                   event.stopPropagation();
-                  removePin(pin.path);
+                  removePin(pin);
                 },
               }, '×'),
             ]);
