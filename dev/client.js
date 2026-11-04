@@ -1065,7 +1065,8 @@ window.__ModuleLoader__.load({
         title: () => t('type.label'),
         guide: [{
           id: 'project-files',
-          order: 30,
+          // 「开始」页里按 order 升序排；内置「工作区」卡是 10，这里取 0 让本插件排在第一个。
+          order: 0,
           title: () => t('guide.title'),
           description: () => t('guide.description'),
           icon: TabGlyph,
