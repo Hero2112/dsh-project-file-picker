@@ -20,7 +20,8 @@
 
 ## 未发布
 
-_（待填写。新改动先记在 `dev/` 里，发版时归入具体版本号。）_
+- 代码注释统一改为中文（`dev/client.js`、`dev/index.js`），功能无变化，随下一版一起冻结
+- 建立 GitHub 私有仓库 `dsh-project-file-picker`，插件目录即仓库根目录
 
 下一版计划见 [versions/v1.0.0.md](versions/v1.0.0.md) 的「下一版计划」。
 
