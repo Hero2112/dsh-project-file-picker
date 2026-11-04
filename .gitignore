@@ -1,0 +1,15 @@
+# 依赖与构建中间产物
+node_modules/
+.tmp/
+*.log
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+
+# 临时文件
+*.tmp
+
+# 说明：dist/*.zip、releases/、dev/ 都要提交（可安装、可回滚的存档）
