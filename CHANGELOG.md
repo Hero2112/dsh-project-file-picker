@@ -1,5 +1,7 @@
 # project-file-picker 版本记录
 
+> 仓库：https://github.com/Hero2112/dsh-project-file-picker （私有）
+
 插件：`@local/project-file-picker` · 当前版本 **1.0.1** · 详细说明见 [`versions/`](versions/)
 
 | 版本 | 日期 | 类型 | 一句话 |

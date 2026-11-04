@@ -1,5 +1,7 @@
 # 项目文件坞（Project File Dock）v1.0.1
 
+> **GitHub 仓库**：https://github.com/Hero2112/dsh-project-file-picker （私有）
+
 DeepSeek Harness Web UI 插件：在**右侧边栏**里浏览当前项目（会话工作目录）的文件，
 把文件或文件夹拖进对话框，顺手预览文件内容，给文件夹打颜色和表情标记。
 
