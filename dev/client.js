@@ -15,6 +15,8 @@ window.__ModuleLoader__.load({
     const SEED_KEY = 'dsh.project-file-picker.seeded';
     /** 文件夹标记按 profile 存：一张以工作目录为根键的 JSON 表。 */
     const TAGS_KEY = 'dsh.project-file-picker.tags.v1';
+    /** 固定的文件 / 文件夹也按 profile 存，同样以工作目录为根键。 */
+    const PINS_KEY = 'dsh.project-file-picker.pins.v1';
     /** 所有文件地址共用的协议与类型前缀。 */
     const FILE_ADDRESS_PREFIX = 'dsh-resource://file/';
 
@@ -59,6 +61,13 @@ window.__ModuleLoader__.load({
       'tag.emoji': '表情',
       'tag.clear': '清除标记',
       'tag.close': '关闭',
+      'pin.button': '固定此位置',
+      'pin.unpin': '取消固定',
+      'pin.section': '固定',
+      'pin.pinned': '已固定 {name}',
+      'pin.unpinned': '已取消固定 {name}',
+      'pin.jumped': '已定位到 {name}',
+      'pin.empty': '还没有固定的位置，点行上的图钉按钮固定',
       'error.notFound': '目录已不存在',
       'error.outsideWorkspace': '目录在工作区之外',
       'error.notDirectory': '这不是一个目录',
@@ -92,6 +101,13 @@ window.__ModuleLoader__.load({
       'tag.emoji': 'Emoji',
       'tag.clear': 'Clear tags',
       'tag.close': 'Close',
+      'pin.button': 'Pin this location',
+      'pin.unpin': 'Unpin',
+      'pin.section': 'Pinned',
+      'pin.pinned': 'Pinned {name}',
+      'pin.unpinned': 'Unpinned {name}',
+      'pin.jumped': 'Jumped to {name}',
+      'pin.empty': 'Nothing pinned yet — press the pin button on a row',
       'error.notFound': 'That directory is gone',
       'error.outsideWorkspace': 'That directory is outside the workspace',
       'error.notDirectory': 'That is not a directory',
@@ -154,6 +170,20 @@ window.__ModuleLoader__.load({
       '.pfp-menuBtn{height:24px;padding:0 8px;font:inherit;font-size:12px;color:var(--dsw-alias-label-secondary);background:none;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;cursor:pointer}',
       '.pfp-menuBtn:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}',
       '.pfp-menuBtn-primary{color:var(--dsw-alias-label-primary);border-color:transparent;background:var(--dsw-alias-bg-layer-2)}',
+      '.pfp-pins{flex:none;border-bottom:.5px solid var(--dsw-alias-border-l3);padding:6px 10px 5px 16px}',
+      '.pfp-pinsHead{display:flex;align-items:center;gap:4px;color:var(--dsw-alias-label-tertiary);font-size:11px;margin-bottom:3px}',
+      '.pfp-pinsHead svg{width:12px;height:12px}',
+      '.pfp-pinList{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:1px;max-height:138px;overflow:auto}',
+      '.pfp-pinItem{display:flex;align-items:center;min-width:0;border-radius:var(--dsw-radius-md,6px)}',
+      '.pfp-pinItem:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+      '.pfp-pinMain{flex:1;min-width:0;display:flex;align-items:center;gap:5px;padding:3px 4px 3px 6px;font:inherit;text-align:left;color:inherit;background:none;border:0;border-radius:inherit;cursor:pointer}',
+      '.pfp-pinMain:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}',
+      '.pfp-pinName{flex:none;max-width:48%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}',
+      '.pfp-pinPath{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;font-size:11px;color:var(--dsw-alias-label-tertiary)}',
+      '.pfp-pinRemove{flex:none;width:20px;height:20px;margin-right:2px;padding:0;line-height:1;font-size:13px;color:var(--dsw-alias-label-tertiary);background:none;border:0;border-radius:var(--dsw-radius-sm,6px);cursor:pointer;opacity:.5}',
+      '.pfp-pinItem:hover .pfp-pinRemove{opacity:1}',
+      '.pfp-pinRemove:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-2)}',
+      '.pfp-rowAction-on{opacity:1;color:var(--dsw-alias-brand-primary)}',
       '.pfp-titleIcon{flex:none;color:var(--dsw-alias-label-tertiary)}',
     ].join('');
 
@@ -266,6 +296,61 @@ window.__ModuleLoader__.load({
       } catch (error) {
         /* 忽略 */
       }
+    }
+
+    /**
+     * 读取整张固定表：以工作目录为根键，值是 `{ path, kind }` 的数组，
+     * path 是相对工作目录的路径。存储损坏或不存在时按空表处理。
+     */
+    function readPins() {
+      try {
+        const raw = window.localStorage.getItem(PINS_KEY);
+        if (raw === null || raw === undefined || raw === '') return {};
+        const parsed = JSON.parse(raw);
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+        const clean = {};
+        for (const root of Object.keys(parsed)) {
+          const list = parsed[root];
+          if (!Array.isArray(list)) continue;
+          const kept = [];
+          for (const item of list) {
+            if (item === null || typeof item !== 'object') continue;
+            if (typeof item.path !== 'string' || item.path === '') continue;
+            kept.push({ path: item.path, kind: item.kind === 'directory' ? 'directory' : 'file' });
+          }
+          if (kept.length > 0) clean[root] = kept;
+        }
+        return clean;
+      } catch (error) {
+        return {};
+      }
+    }
+
+    /** 写回整张固定表；存储被禁用时只是丢了持久化。 */
+    function writePins(pins) {
+      try {
+        window.localStorage.setItem(PINS_KEY, JSON.stringify(pins));
+      } catch (error) {
+        /* 忽略 */
+      }
+    }
+
+    /**
+     * 从工作目录到某个路径的整条祖先链（含两端）。
+     * 固定一个深目录后，靠它把沿途每一层都展开。
+     */
+    function ancestorChain(root, path) {
+      const base = posixOf(root === undefined || root === null ? '' : root).replace(/\/+$/, '');
+      const relative = relativeTo(base, path);
+      const chain = [base];
+      if (relative === '') return chain;
+      let current = base;
+      for (const part of relative.split('/')) {
+        if (part === '') continue;
+        current = joinPath(current, part);
+        chain.push(current);
+      }
+      return chain;
     }
 
     /** 页签图标 / 引导卡插图：文件夹向下落进输入框。 */
@@ -391,6 +476,25 @@ window.__ModuleLoader__.load({
       ]);
     }
 
+    /**
+     * 行上的「固定 / 取消固定」按钮图标：一枚图钉。
+     * 顶部是钉帽，下面张开成钉身，中间一条针。
+     */
+    function PinGlyph() {
+      return h('svg', { viewBox: '0 0 16 16', width: 14, height: 14, 'aria-hidden': true }, [
+        h('path', {
+          key: 'head',
+          d: 'M6.3 1.7h3.4l-.3 2.1 2 2.4v1.3H4.6V6.2l2-2.4z',
+          fill: 'currentColor', opacity: 0.9,
+        }),
+        h('path', {
+          key: 'needle',
+          d: 'M8 7.6v6.6',
+          fill: 'none', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round',
+        }),
+      ]);
+    }
+
     function failureText(tr, failure) {
       const code = failure !== undefined && failure !== null ? failure.code : undefined;
       if (code === 'workspace-file/not-found') return tr('error.notFound');
@@ -443,9 +547,12 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /** 一个文件行：点击插入引用，眼睛按钮打开产品自带的预览。 */
+    /**
+     * 一个文件行：点击插入引用，眼睛按钮打开产品自带的预览，
+     * 图钉按钮把它的路径固定到列表顶部。
+     */
     function FileRow(props) {
-      const { path, label, title, tr, onInsert, onView, onDragStart, onDragEnd } = props;
+      const { path, label, title, tr, pinned, onInsert, onView, onPin, onDragStart, onDragEnd } = props;
       return h('div', { className: 'pfp-row pfp-rowFile' }, [
         h('div', {
           key: 'main',
@@ -454,6 +561,7 @@ window.__ModuleLoader__.load({
           draggable: true,
           className: 'pfp-rowMain',
           title: title,
+          'data-pfp-path': posixOf(path),
           onClick: () => onInsert(path),
           onKeyDown: (event) => {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -467,6 +575,19 @@ window.__ModuleLoader__.load({
           h(FileGlyph, { key: 'icon' }),
           h('span', { key: 'name', className: 'pfp-name' }, label),
         ]),
+        h('button', {
+          key: 'pin',
+          type: 'button',
+          className: pinned === true ? 'pfp-rowAction pfp-rowAction-on' : 'pfp-rowAction',
+          title: pinned === true ? tr('pin.unpin') : tr('pin.button'),
+          'aria-label': pinned === true ? tr('pin.unpin') : tr('pin.button'),
+          'aria-pressed': pinned === true,
+          'data-pfp-pin': '1',
+          onClick: (event) => {
+            event.stopPropagation();
+            onPin(path, 'file');
+          },
+        }, h(PinGlyph)),
         h('button', {
           key: 'view',
           type: 'button',
@@ -488,7 +609,7 @@ window.__ModuleLoader__.load({
     function TreeLevel(props) {
       const {
         path, levels, expanded, tr, tagOf, tagEditor, onToggle, onTagToggle, onTagSet, onTagClear,
-        onInsert, onInsertDir, onView, onDragStart, onDragEnd,
+        onInsert, onInsertDir, onView, onDragStart, onDragEnd, isPinned, onPin,
       } = props;
       const level = levels[path];
       if (level === undefined || level.kind === 'loading') {
@@ -519,8 +640,10 @@ window.__ModuleLoader__.load({
             label: entry.name,
             title: childPath,
             tr: tr,
+            pinned: typeof isPinned === 'function' ? isPinned(childPath) : false,
             onInsert: onInsert,
             onView: onView,
+            onPin: onPin,
             onDragStart: onDragStart,
             onDragEnd: onDragEnd,
           })));
@@ -540,6 +663,7 @@ window.__ModuleLoader__.load({
               draggable: true,
               className: 'pfp-rowMain',
               title: childPath,
+              'data-pfp-path': posixOf(childPath),
               'aria-expanded': isOpen,
               onClick: () => onToggle(childPath),
               onKeyDown: (event) => {
@@ -556,6 +680,21 @@ window.__ModuleLoader__.load({
               h('span', { key: 'name', className: 'pfp-name' }, entry.name),
               emoji === undefined ? null : h('span', { key: 'emoji', className: 'pfp-emoji', 'aria-hidden': true }, emoji),
             ]),
+            h('button', {
+              key: 'pin',
+              type: 'button',
+              className: typeof isPinned === 'function' && isPinned(childPath) === true
+                ? 'pfp-rowAction pfp-rowAction-on'
+                : 'pfp-rowAction',
+              title: typeof isPinned === 'function' && isPinned(childPath) === true ? tr('pin.unpin') : tr('pin.button'),
+              'aria-label': typeof isPinned === 'function' && isPinned(childPath) === true ? tr('pin.unpin') : tr('pin.button'),
+              'aria-pressed': typeof isPinned === 'function' && isPinned(childPath) === true,
+              'data-pfp-pin': '1',
+              onClick: (event) => {
+                event.stopPropagation();
+                onPin(childPath, 'directory');
+              },
+            }, h(PinGlyph)),
             h('button', {
               key: 'insert',
               type: 'button',
@@ -609,6 +748,8 @@ window.__ModuleLoader__.load({
             onView: onView,
             onDragStart: onDragStart,
             onDragEnd: onDragEnd,
+            isPinned: isPinned,
+            onPin: onPin,
           }) : null,
         ]));
       }
@@ -695,6 +836,8 @@ window.__ModuleLoader__.load({
       const [dragging, setDragging] = useState(false);
       const [tags, setTags] = useState(() => readTags());
       const [tagEditor, setTagEditor] = useState(null);
+      const [pins, setPins] = useState(() => readPins());
+      const [reveal, setReveal] = useState(null);
 
       const controllers = useRef(new Map());
       const listApi = useRef(listDirectory);
@@ -779,6 +922,57 @@ window.__ModuleLoader__.load({
         }
       }, [root, expanded, levels]);
 
+      // 固定过的目录，在刷新页面或切换会话后自动展开到那一层，
+      // 这样固定的深目录一打开就是原地状态。
+      useEffect(() => {
+        if (root === undefined) return;
+        const list = pins[root];
+        if (!Array.isArray(list)) return;
+        const wanted = [];
+        for (const pin of list) {
+          if (pin.kind !== 'directory') continue;
+          for (const path of ancestorChain(root, joinPath(root, pin.path))) {
+            if (wanted.indexOf(path) < 0) wanted.push(path);
+          }
+        }
+        if (wanted.length === 0) return;
+        setExpanded((prev) => {
+          let changed = false;
+          const next = prev.slice();
+          for (const path of wanted) {
+            if (next.indexOf(path) < 0) {
+              next.push(path);
+              changed = true;
+            }
+          }
+          return changed ? next : prev;
+        });
+      }, [root, pins]);
+
+      // 点了固定项之后，把那一行滚进可见区域；层级还没读出来时保留目标，等下一轮再试。
+      useEffect(() => {
+        if (reveal === null) return undefined;
+        const timer = setTimeout(() => {
+          let found = false;
+          try {
+            if (typeof document !== 'undefined') {
+              const nodes = document.querySelectorAll('[data-pfp-path]');
+              for (const node of nodes) {
+                if (node.getAttribute('data-pfp-path') === reveal.path) {
+                  node.scrollIntoView({ block: 'center' });
+                  found = true;
+                  break;
+                }
+              }
+            }
+          } catch (error) {
+            /* 滚动失败不影响功能 */
+          }
+          if (found) setReveal(null);
+        }, 90);
+        return () => clearTimeout(timer);
+      }, [reveal, levels, expanded]);
+
       const reload = () => {
         const paths = expanded.length > 0 ? expanded : root === undefined ? [] : [root];
         for (const path of paths) {
@@ -862,6 +1056,79 @@ window.__ModuleLoader__.load({
         if (byRoot === undefined || byRoot === null) return undefined;
         const record = byRoot[relativeTo(root, path)];
         return record !== undefined && record !== null ? record : undefined;
+      };
+
+      /** 当前工作目录下的固定项；顺序就是显示顺序（后固定的在前面）。 */
+      const pinsForRoot = root === undefined
+        ? []
+        : (Array.isArray(pins[root]) ? pins[root] : []);
+
+      /** 某个绝对路径是否已被固定。 */
+      const isPinned = (path) => {
+        if (root === undefined) return false;
+        const relative = relativeTo(root, path);
+        if (relative === '') return false;
+        for (const pin of pinsForRoot) {
+          if (pin.path === relative) return true;
+        }
+        return false;
+      };
+
+      // 固定表同样不可变地整张替换并落盘。
+      const writePinsFor = (list) => {
+        if (root === undefined) return;
+        const next = Object.assign({}, pins);
+        if (list.length === 0) delete next[root];
+        else next[root] = list;
+        setPins(next);
+        writePins(next);
+      };
+
+      /** 固定 / 取消固定；kind 只在这一行还没被固定时用得上。 */
+      const togglePin = (path, kind) => {
+        if (root === undefined) return;
+        const relative = relativeTo(root, path);
+        if (relative === '') return;
+        const name = relative.split('/').pop();
+        const already = pinsForRoot.some((pin) => pin.path === relative);
+        if (already) {
+          writePinsFor(pinsForRoot.filter((pin) => pin.path !== relative));
+          setStatus({ message: tr('pin.unpinned', { name: name }), error: false });
+          return;
+        }
+        const entry = { path: relative, kind: kind === 'directory' ? 'directory' : 'file' };
+        writePinsFor([entry].concat(pinsForRoot));
+        setStatus({ message: tr('pin.pinned', { name: name }), error: false });
+      };
+
+      /** 固定区里的 × 号：按相对路径取消固定。 */
+      const removePin = (relative) => {
+        const name = relative.split('/').pop();
+        writePinsFor(pinsForRoot.filter((pin) => pin.path !== relative));
+        setStatus({ message: tr('pin.unpinned', { name: name }), error: false });
+      };
+
+      /**
+       * 点固定区的一行：目录就展开并定位过去，文件就直接插入引用。
+       * 目录的祖先链要一起展开，否则那一层根本不在树上。
+       */
+      const openPin = (pin) => {
+        if (root === undefined) return;
+        const absolute = joinPath(root, pin.path);
+        if (pin.kind === 'directory') {
+          const chain = ancestorChain(root, absolute);
+          setExpanded((prev) => {
+            const next = prev.slice();
+            for (const path of chain) {
+              if (next.indexOf(path) < 0) next.push(path);
+            }
+            return next;
+          });
+          setReveal({ path: absolute, at: Date.now() });
+          setStatus({ message: tr('pin.jumped', { name: pin.path.split('/').pop() }), error: false });
+          return;
+        }
+        insertPath(absolute);
       };
 
       // 写标记时不可变地替换整张表，并落盘。
@@ -998,8 +1265,10 @@ window.__ModuleLoader__.load({
             label: relativeTo(root, file.path),
             title: file.path,
             tr: tr,
+            pinned: isPinned(file.path),
             onInsert: insertPath,
             onView: viewFile,
+            onPin: togglePin,
             onDragStart: onDragStart,
             onDragEnd: onDragEnd,
           }))));
@@ -1021,8 +1290,52 @@ window.__ModuleLoader__.load({
           onView: viewFile,
           onDragStart: onDragStart,
           onDragEnd: onDragEnd,
+          isPinned: isPinned,
+          onPin: togglePin,
         });
       }
+
+      // 固定区：把深目录 / 常用文件钉在列表上方，刷新和切会话后都还在。
+      const pinsSection = h('div', { key: 'pins', className: 'pfp-pins', 'data-pfp-pins': '1' }, [
+        h('div', { key: 'head', className: 'pfp-pinsHead' }, [
+          h(PinGlyph, { key: 'glyph' }),
+          h('span', { key: 'label' }, tr('pin.section')),
+          h('span', { key: 'count' }, '· ' + pinsForRoot.length),
+        ]),
+        pinsForRoot.length === 0
+          ? h('p', { key: 'empty', className: 'pfp-note', style: { padding: '2px 0' } }, tr('pin.empty'))
+          : h('ul', { key: 'list', className: 'pfp-pinList' }, pinsForRoot.map((pin) => {
+            const name = pin.path.split('/').pop();
+            return h('li', { key: pin.path, className: 'pfp-pinItem' }, [
+              h('button', {
+                key: 'main',
+                type: 'button',
+                className: 'pfp-pinMain',
+                title: pin.path,
+                'data-pfp-pin-open': pin.path,
+                onClick: () => openPin(pin),
+              }, [
+                pin.kind === 'directory'
+                  ? h(FolderGlyph, { key: 'icon', color: (tagOf(joinPath(root, pin.path)) || {}).color })
+                  : h(FileGlyph, { key: 'icon' }),
+                h('span', { key: 'name', className: 'pfp-pinName' }, name),
+                h('span', { key: 'path', className: 'pfp-pinPath' }, pin.path),
+              ]),
+              h('button', {
+                key: 'remove',
+                type: 'button',
+                className: 'pfp-pinRemove',
+                title: tr('pin.unpin'),
+                'aria-label': tr('pin.unpin'),
+                'data-pfp-pin-remove': pin.path,
+                onClick: (event) => {
+                  event.stopPropagation();
+                  removePin(pin.path);
+                },
+              }, '×'),
+            ]);
+          })),
+      ]);
 
       const message = dragging
         ? tr('hint.dragging')
@@ -1034,6 +1347,7 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'pfp-root', 'data-project-files-root': root }, [
         header,
         filterRow,
+        pinsSection,
         h('div', { key: 'body', className: 'pfp-body' }, body),
         h('div', { key: 'foot', className: 'pfp-foot' }, [
           h('span', {

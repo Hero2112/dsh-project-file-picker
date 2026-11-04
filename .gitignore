@@ -12,4 +12,9 @@ desktop.ini
 # 临时文件
 *.tmp
 
+# 网盘同步冲突副本（AirDisk/OneDrive 等会生成，绝不能进仓库）
+*.sync-conflict-*
+*冲突*
+*conflicted copy*
+
 # 说明：dist/*.zip、releases/、dev/ 都要提交（可安装、可回滚的存档）
