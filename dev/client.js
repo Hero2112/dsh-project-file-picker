@@ -103,11 +103,16 @@ window.__ModuleLoader__.load({
       'menu.copyAbs': '复制绝对路径',
       'menu.copyMd': '复制 Markdown 链接',
       'menu.reveal': '在文件管理器中显示',
+      'menu.obsidian': '在 Obsidian 中打开',
       'menu.tag': '标记颜色和表情',
       'copied': '已复制{what}',
       'copyFailed': '复制失败',
       'revealFailed': '打不开文件管理器',
       'revealed': '已在文件管理器中显示',
+      'obsidian.requested': '已请求在 Obsidian 中打开 {name}',
+      'obsidian.blocked': '浏览器拦住了 obsidian:// 协议，看下地址栏右侧的提示并允许一次',
+      'obsidian.failed': '发不出 obsidian:// 请求，确认本机装了 Obsidian',
+      'obsidian.vaultHint': '已打开 vault {vault}（Obsidian 不支持定位到子文件夹）',
       'preview.title': '预览',
       'preview.loading': '正在读取…',
       'preview.truncated': '只显示前 {n} 行',
@@ -208,10 +213,15 @@ window.__ModuleLoader__.load({
       'menu.copyAbs': 'Copy absolute path',
       'menu.copyMd': 'Copy as Markdown link',
       'menu.reveal': 'Show in file manager',
+      'menu.obsidian': 'Open in Obsidian',
       'menu.tag': 'Colour and emoji',
       'copied': 'Copied {what}',
       'copyFailed': 'Copy failed',
       'revealFailed': 'Could not open the file manager',
+      'obsidian.requested': 'Asked Obsidian to open {name}',
+      'obsidian.blocked': 'The browser blocked obsidian:// — allow it once from the address bar prompt',
+      'obsidian.failed': 'Could not send the obsidian:// request; check that Obsidian is installed',
+      'obsidian.vaultHint': 'Opened vault {vault} (Obsidian cannot focus a sub-folder)',
       'preview.title': 'Preview',
       'preview.loading': 'Reading…',
       'preview.truncated': 'Only the first {n} lines are shown',
@@ -2155,6 +2165,74 @@ window.__ModuleLoader__.load({
         setPreview(null);
       };
 
+      /** 某个目录里有没有某个子目录（用来判断 vault 根，靠 .obsidian 认）。 */
+      const directoryExists = async (path) => {
+        try {
+          const controller = new AbortController();
+          const result = await listApi.current(sessionId, path, controller.signal);
+          return result !== undefined && result !== null && result.ok === true;
+        } catch (error) {
+          return false;
+        }
+      };
+
+      /**
+       * 在 Obsidian 中打开：走 obsidian:// 协议，不经过任何后端。
+       * - 文件：用 path 形式，Obsidian 自己找到包含它的 vault 并定位到文件。
+       * - 文件夹：Obsidian 的 URI 只能开 vault，所以先认一下最近一层带 .obsidian 的祖先，
+       *   有就开那个 vault；认不出来就退回 path 形式碰运气。
+       */
+      const launchObsidian = async (path, kind) => {
+        const base = rootRef.current;
+        if (base === undefined) return;
+        const absolute = posixOf(path);
+        const name = absolute.replace(/\/+$/, '').split('/').pop();
+        const encoded = encodeURIComponent(absolute);
+        let uri = 'obsidian://open?path=' + encoded;
+        let vaultName;
+
+        if (kind === 'directory') {
+          // 先看这个目录自己是不是 vault 根，再看会话工作目录是不是。
+          const candidates = [absolute, base];
+          for (const candidate of candidates) {
+            if (await directoryExists(candidate + '/.obsidian')) {
+              vaultName = posixOf(candidate).replace(/\/+$/, '').split('/').pop();
+              uri = 'obsidian://open?vault=' + encodeURIComponent(vaultName);
+              break;
+            }
+          }
+        }
+
+        let opened = false;
+        try {
+          if (typeof window !== 'undefined' && typeof window.open === 'function') {
+            window.open(uri, '_blank');
+            opened = true;
+          }
+        } catch (error) {
+          opened = false;
+        }
+        if (!opened) {
+          try {
+            if (typeof window !== 'undefined' && window.location !== undefined) {
+              window.location.href = uri;
+              opened = true;
+            }
+          } catch (error) {
+            opened = false;
+          }
+        }
+        if (!opened) {
+          setStatus({ message: tr('obsidian.failed'), error: true });
+          return;
+        }
+        if (vaultName !== undefined && kind === 'directory') {
+          setStatus({ message: tr('obsidian.vaultHint', { vault: vaultName }), error: false });
+          return;
+        }
+        setStatus({ message: tr('obsidian.requested', { name: name }), error: false });
+      };
+
       /** 读一段文本在面板里预览；读不了的（图片等）直接交给产品预览页签。 */
       const openInline = async (path) => {
         if (root === undefined) return;
@@ -2871,6 +2949,18 @@ window.__ModuleLoader__.load({
             onClick: () => { setMenu(null); revealPath(menu.path); },
           }, tr('menu.reveal'))
           : null,
+        h('button', {
+          key: 'obsidian',
+          type: 'button',
+          className: 'pfp-menuItem',
+          'data-pfp-menu-item': 'obsidian',
+          onClick: () => {
+            setMenu(null);
+            launchObsidian(menu.path, menu.kind).catch(() => {
+              setStatus({ message: tr('obsidian.failed'), error: true });
+            });
+          },
+        }, tr('menu.obsidian')),
         menu.kind === 'directory'
           ? h('button', {
             key: 'tag',

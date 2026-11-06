@@ -1,0 +1,35 @@
+{
+  "name": "@local/project-file-picker",
+  "version": "1.5.0",
+  "private": true,
+  "description": "Right-sidebar project file dock: browse, double-click to insert, multi-select, context menu (copy paths, reveal, open in Obsidian), inline text preview, project-wide search, favourites with one-click jump, recent list, folder colours and emoji.",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "INSTALL.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-api-remotes"
+      ]
+    }
+  }
+}

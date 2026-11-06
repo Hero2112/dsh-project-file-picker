@@ -40,6 +40,8 @@ const reactStub = {
 };
 
 const storage = new Map();
+/** 被 window.open 打开的地址（Obsidian 协议之类）。 */
+const openedUris = [];
 const windowStub = {
   localStorage: {
     getItem: (key) => (storage.has(key) ? storage.get(key) : null),
@@ -48,6 +50,10 @@ const windowStub = {
   },
   addEventListener: () => {},
   removeEventListener: () => {},
+  open: (uri) => {
+    openedUris.push(uri);
+    return {};
+  },
   innerWidth: 1200,
   innerHeight: 800,
   __ModuleLoader__: {
@@ -68,7 +74,9 @@ const remote = {
     list: async (sessionId, path) => {
       listCalls.push({ sessionId, path });
       const found = listFixture.get(path);
-      return { ok: true, value: found === undefined ? { entries: [], truncated: false } : found };
+      if (found !== undefined) return { ok: true, value: found };
+      if (path === 'F:/demo project') return { ok: true, value: { entries: [], truncated: false } };
+      return { ok: false, error: { code: 'workspace-file/not-found' } };
     },
     read: async (sessionId, path, range) => {
       readCalls += 1;
@@ -448,7 +456,7 @@ const menu = findAll(menuTree, (node) => node.props['data-pfp-menu'] === '1')[0]
 if (menu === undefined) throw new Error('the context menu did not render');
 const menuItems = findAll(menu, (node) => node.props['data-pfp-menu-item'] !== undefined);
 const menuIds = menuItems.map((node) => node.props['data-pfp-menu-item']);
-for (const wanted of ['insert', 'view', 'inline', 'pin', 'copyRel', 'copyAbs', 'copyMd', 'reveal']) {
+for (const wanted of ['insert', 'view', 'inline', 'pin', 'copyRel', 'copyAbs', 'copyMd', 'reveal', 'obsidian']) {
   if (menuIds.indexOf(wanted) < 0) throw new Error('the context menu is missing ' + wanted + ': ' + menuIds.join(','));
 }
 copies.length = 0;
@@ -460,7 +468,29 @@ findAll(menu, (node) => node.props['data-pfp-menu-item'] === 'copyMd')[0].props.
 await new Promise((resolve) => { setTimeout(resolve, 0); });
 if (copies.length !== 1 || copies[0] !== '[a b.txt](<a b.txt>)') throw new Error('copying the Markdown link failed: ' + JSON.stringify(copies));
 
-// 10. 面板内预览：读一段文本直接显示在面板里。
+// 10. 在 Obsidian 中打开：文件走 path 协议，文件夹先认 .obsidian 再开 vault。
+openedUris.length = 0;
+const obsidianFileMenu = renderBody({ menu: { x: 320, y: 140, path: 'F:/demo project/a b.txt', kind: 'file' } });
+const obsidianFileItem = findAll(obsidianFileMenu, (node) => node.props['data-pfp-menu-item'] === 'obsidian')[0];
+if (obsidianFileItem === undefined) throw new Error('the context menu has no Obsidian item');
+obsidianFileItem.props.onClick();
+await new Promise((resolve) => { setTimeout(resolve, 0); });
+if (openedUris.length !== 1) throw new Error('opening a file in Obsidian did not call window.open');
+if (openedUris[0] !== 'obsidian://open?path=F%3A%2Fdemo%20project%2Fa%20b.txt') {
+  throw new Error('unexpected obsidian uri: ' + openedUris[0]);
+}
+
+listFixture.set('F:/demo project/.obsidian', { entries: [], truncated: false });
+openedUris.length = 0;
+const obsidianFolderMenu = renderBody({ menu: { x: 320, y: 140, path: 'F:/demo project/src', kind: 'directory' } });
+findAll(obsidianFolderMenu, (node) => node.props['data-pfp-menu-item'] === 'obsidian')[0].props.onClick();
+await new Promise((resolve) => { setTimeout(resolve, 0); });
+if (openedUris.length !== 1) throw new Error('opening a folder in Obsidian did not call window.open');
+if (openedUris[0] !== 'obsidian://open?vault=demo%20project') {
+  throw new Error('a folder should open its containing vault, got: ' + openedUris[0]);
+}
+
+// 11. 面板内预览：读一段文本直接显示在面板里。
 readFixtures.set('F:/demo project/a b.txt', { offset: 1, text: 'hello\nworld', lines: 2, eof: true });
 const previewTree = renderBody({ preview: { kind: 'ready', path: 'F:/demo project/a b.txt', text: 'hello\nworld', lines: 2, eof: true } });
 const previewPane = findAll(previewTree, (node) => node.props['data-pfp-preview'] === '1')[0];
@@ -477,7 +507,7 @@ menuInline.props.onClick();
 await new Promise((resolve) => { setTimeout(resolve, 0); });
 if (readCalls !== 1) throw new Error('the inline preview did not call the file reader, calls=' + readCalls);
 
-// 11. 标记：文件夹行打开标记面板，颜色写入存储。
+// 12. 标记：文件夹行打开标记面板，颜色写入存储。
 storage.delete('dsh.project-file-picker.tags.v1');
 const tagTree = renderBody({ tagEditor: 'F:/demo project/src' });
 const editor = findAll(tagTree, (node) => node.props['data-pfp-tag-editor'] === '1')[0];
@@ -488,7 +518,7 @@ swatch.props.onClick();
 const tagsStored = JSON.parse(storage.get('dsh.project-file-picker.tags.v1'));
 if (tagsStored['F:/demo project'].src.color !== '#0091ff') throw new Error('the colour tag was not persisted: ' + JSON.stringify(tagsStored));
 
-// 12. 收藏（快速访问）：写盘、点目录跳转并预取沿途各层、点文件插入引用、× 删掉。
+// 13. 收藏（快速访问）：写盘、点目录跳转并预取沿途各层、点文件插入引用、× 删掉。
 storage.delete('dsh.project-file-picker.pins.v3');
 const pinsTree = renderBody({ pins: [{ path: 'src', kind: 'directory' }, { path: 'a b.txt', kind: 'file' }] });
 const pinRows = findAll(pinsTree, (node) => node.props['data-pfp-pin-open'] !== undefined);
@@ -550,7 +580,7 @@ const migratedMap = JSON.parse(storage.get('dsh.project-file-picker.pins.v3'));
 if (!migratedMap['session-1'] || migratedMap['session-1'][0].path !== 'src') throw new Error('the migrated favourites have the wrong shape');
 if (storage.has('dsh.project-file-picker.pins.v1')) throw new Error('the legacy favourites table was left behind');
 
-// 13. 设置：行高、排序、只看标记、收藏折叠、收藏共享、浏览位置都会落盘。
+// 14. 设置：行高、排序、只看标记、收藏折叠、收藏共享、浏览位置都会落盘。
 storage.delete('dsh.project-file-picker.settings.v1');
 const densityTree = renderBody();
 findAll(densityTree, (node) => node.props['data-pfp-density'] !== undefined)[0].props.onClick();
@@ -590,7 +620,7 @@ if (!viewStored['session-1'] || viewStored['session-1'].expanded.indexOf('F:/dem
   throw new Error('the browse position was not persisted: ' + JSON.stringify(viewStored));
 }
 
-// 14. 搜索整个项目：开启后输入关键字会递归读目录并列出命中项。
+// 15. 搜索整个项目：开启后输入关键字会递归读目录并列出命中项。
 listFixture.clear();
 listFixture.set('F:/demo project', {
   truncated: false,
@@ -621,7 +651,7 @@ if (hits.length !== 1) throw new Error('search results are not rendered, rows=' 
 const searchPaths = listCalls.map((call) => call.path);
 if (searchPaths.indexOf('F:/demo project/src') < 0) throw new Error('the recursive search never walked into src');
 
-// 15. 错误提示条：出错时在顶部出现，可以关掉。
+// 16. 错误提示条：出错时在顶部出现，可以关掉。
 const errorTree = renderBody({ status: { message: '读取失败', error: true } });
 const errorBar = findAll(errorTree, (node) => node.props['data-pfp-error'] === '1')[0];
 if (errorBar === undefined) throw new Error('an error did not render the top bar');
@@ -630,7 +660,7 @@ stateWrites = [];
 closeError.props.onClick(fakeEvent());
 if (writeAt(5).pop() === undefined) throw new Error('closing the error bar did not hide it');
 
-// 16. 没有工作目录时给出说明。
+// 17. 没有工作目录时给出说明。
 const emptySession = renderBody({}, {
   sessionId: 'session-3',
   useSessions: (selector) => selector({ byId: { 'session-3': {} } }),
