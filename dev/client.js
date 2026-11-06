@@ -1277,7 +1277,7 @@ window.__ModuleLoader__.load({
       const {
         path, levels, expanded, tr, tagOf, tagEditor, onToggle, onTagToggle, onTagSet, onTagClear,
         onInsert, onInsertDir, onView, onDragStart, onDragEnd, isPinned, onPin, highlight,
-        isSelected, onSelect, onContextMenu, sortMode, markedOnly,
+        isSelected, onSelect, onContextMenu, sortMode, markedOnly, onExpand,
       } = props;
       const level = levels[path];
       if (level === undefined || level.kind === 'loading') {
@@ -1358,9 +1358,15 @@ window.__ModuleLoader__.load({
               'aria-expanded': isOpen,
               onClick: (event) => {
                 onSelect(childPath, 'directory', event);
-                onToggle(childPath);
+                // Ctrl / Cmd 加选时不要顺带翻转展开状态，不然多选很烦。
+                const multi = event !== undefined && event !== null && (event.ctrlKey === true || event.metaKey === true);
+                if (!multi) onToggle(childPath);
               },
-              onDoubleClick: () => onInsertDir(childPath),
+              onDoubleClick: () => {
+                // 双击是「插入这个目录」，别让两次单击把它折起来。
+                if (typeof onExpand === 'function') onExpand(childPath);
+                onInsertDir(childPath);
+              },
               onContextMenu: (event) => onContextMenu(event, childPath, 'directory'),
               onKeyDown: (event) => {
                 if (event.key === 'Enter') {
@@ -1452,6 +1458,7 @@ window.__ModuleLoader__.load({
             onContextMenu: onContextMenu,
             sortMode: sortMode,
             markedOnly: markedOnly,
+            onExpand: onExpand,
           }) : null,
         ]));
       }
@@ -1796,6 +1803,11 @@ window.__ModuleLoader__.load({
           if (prev.indexOf(path) >= 0) return prev.filter((value) => value !== path && value.indexOf(path + '/') !== 0);
           return prev.concat([path]);
         });
+      };
+
+      /** 只展开、不折叠：双击插入目录时用，别把刚展开的层收起来。 */
+      const expandDirectory = (path) => {
+        setExpanded((prev) => (prev.indexOf(path) >= 0 ? prev : prev.concat([path])));
       };
 
       const insertEntry = (path, kind) => {
@@ -2555,6 +2567,7 @@ window.__ModuleLoader__.load({
           onContextMenu: openMenu,
           sortMode: settings.sort,
           markedOnly: settings.markedOnly === true,
+          onExpand: expandDirectory,
         });
       }
 
