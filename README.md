@@ -1,4 +1,4 @@
-# 项目文件坞（Project File Dock）v1.5.0
+# 项目文件坞（Project File Dock）v1.6.0
 
 > **GitHub 仓库**：https://github.com/Hero2112/dsh-project-file-picker （私有）
 
@@ -65,7 +65,10 @@ DeepSeek Harness Web UI 插件：在**右侧边栏**里浏览当前项目（会�
 | 读文本 | `ctx.remote.workspaceFiles.read(sessionId, path, { offset, limit }, signal)` | 面板内预览 |
 | 资源预览 | `tab.actions.openResource(dsh-resource://file/session/<id>/<path>)` | 眼睛按钮 / 预览页签 |
 | 系统文件管理器 | `ctx.remote.session.openWorkspacePath({ path, action: 'reveal' }, signal)` | 右键「在文件管理器中显示」 |
-| 剪贴板 | `navigator.clipboard.writeText`（带 textarea 兜底） | 复制路径 / Markdown 链接 |
+| 剪贴板 | 
+avigator.clipboard.writeText（带 textarea 兜底） | 复制路径 / Markdown 链接 |
+| 本地路由 | ctx.webServer.register({ kind: 'exact', path, resource }) | 客户端请 Host 拉起 Obsidian |
+| 子进程 | ctx.subprocess.spawn({ argv, cwd, stdio, graceMs }) | 执行系统打开命令 |
 
 缺失的能力（比如某个 profile 没有 `remote.session`）只会隐藏对应菜单项，不影响其他功能。
 
@@ -77,8 +80,8 @@ DeepSeek Harness Web UI 插件：在**右侧边栏**里浏览当前项目（会�
 - 目录条目只带 `name / type / size`，没有修改时间，所以排序只有名称 / 类型 / 大小三种
 - 面板内预览只读 UTF-8 文本的前 400 行；二进制、图片、压缩包交给预览页签
 - 只作用于会话工作目录内部，不能浏览工作目录之外的路径
-- 「在 Obsidian 中打开」走 obsidian:// 协议：文件能定位到具体文件；文件夹只能打开包含它的 vault（Obsidian 的 URI 不支持聚焦子文件夹）。需要本机装了 Obsidian，并且浏览器第一次会弹窗问是否允许这个协议
-- 认 vault 靠的是目标目录或会话工作目录下有没有 .obsidian；都不在 vault 里时会退回用路径让 Obsidian 自己找
+- 「在 Obsidian 中打开」要 **Host 半**参与：客户端 POST 到本地路由 `/x-project-file-picker/obsidian`，Host 用系统命令（Windows 是 `rundll32 url.dll,FileProtocolHandler`）拉起 `obsidian://`。所以升级这一版要重启 DSH；宿主路由不可用时客户端退回页面直接开协议（Electron 下常被拦）
+- 文件夹只能打开所在 vault，不能聚焦子文件夹；vault 靠目标目录或会话工作目录下的 `.obsidian` 认
 - 插件目录若放在同步盘里，同步客户端可能生成 `locale/zh.sync-conflict-*.json`，导致插件列表的显示名报「包元信息错误」（功能不受影响）。处理办法见排错一节
 
 ## 排错
@@ -96,10 +99,11 @@ Harness 读取插件显示名时，会把 `locale/` 下**每个** `*.json` 的�
 
 ```powershell
 node --check dev/client.js        # 语法检查
-node tests/run.cjs dev/client.js  # 冒烟测试（桩 React，不渲染真实界面）
+node tests/run.cjs dev/client.js  # 客户端冒烟测试（桩 React，不渲染真实界面）
+node tests/host.mjs dev/index.js  # Host 半冒烟测试（桩 ctx，不启动 DSH）
 ```
 
 ## 版本
 
-当前版本 **1.5.0**。安装到别的电脑见同目录的 `INSTALL.md`；版本历史见插件库根目录的
+当前版本 **1.6.0**。安装到别的电脑见同目录的 `INSTALL.md`；版本历史见插件库根目录的
 `CHANGELOG.md` 与 `versions/`（不进安装包）。

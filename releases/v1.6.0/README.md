@@ -1,0 +1,109 @@
+# 项目文件坞（Project File Dock）v1.6.0
+
+> **GitHub 仓库**：https://github.com/Hero2112/dsh-project-file-picker （私有）
+
+DeepSeek Harness Web UI 插件：在**右侧边栏**里浏览当前项目（会话工作目录）的文件，
+双击插入引用、拖进对话框，右键出菜单，面板里直接预览内容；
+常用位置收进「快速访问」，点一下就展开展开跳过去；目录还能打颜色和表情标记。
+
+## 打开方式
+
+右侧边栏（右栏）的页签栏里有一个「项目文件坞」页签，图标是"文件夹落进对话框"。
+首次安装后侧栏会自动展开一次并打开它；之后从右栏「开始」页进入——这个插件是「开始」页里的**第一张卡**。
+
+## 功能
+
+| # | 能力 | 用法 |
+|---|---|---|
+| 1 | 浏览项目文件 | 右栏页签内按会话工作目录逐层展开；顶部显示工作目录；行高可切「紧凑 / 舒适」 |
+| 2 | 单击选中、双击插入 | 单击文件行 = 选中；双击文件行 = 插入 `@相对路径`；双击文件夹 = 插入 `@相对路径/`（并保持展开）。Ctrl / Cmd 加选不会翻转展开状态。拖拽文件/文件夹进行内照旧可用 |
+| 3 | 多选批量插入 | 按 Ctrl / Cmd 点行加选；底部出现「已选 N 项」，点「插入引用」一次插入多条 |
+| 4 | 右键菜单 | 右键任意行：插入引用 / 预览页签打开 / 面板内预览 / 收藏 / 复制相对路径 / 复制绝对路径 / 复制 Markdown 链接 / 在文件管理器中显示 / **在 Obsidian 中打开** / 标记颜色和表情 |
+| 5 | 面板内预览 | 右键 →「在面板里预览」：直接读文件前 400 行显示在右栏底部（带行数、可继续用预览页签打开）；图片和压缩包自动改用产品预览页签 |
+| 6 | 全项目搜索 | 输入框右边的放大镜：开启后输入关键字会**递归搜索整个工作目录**（跳过 node_modules、dist 等），显示扫描进度和命中文件，双击插入 |
+| 7 | 快速访问（收藏夹） | 行上的图钉 = 收藏。收藏项在「快速访问」区：点目录立刻展开祖先链、并行读沿途各层、自动滚到位并闪高亮；点文件直接插入引用。可折叠、可拖拽排序、可导出/导入 JSON，还能切成「仅本对话 / 所有对话共用」 |
+| 8 | 最近使用 | 插入、预览、跳转都会记一笔；「最近」区默认收起，点开就是最近用过的目录和文件 |
+| 9 | 文件夹标记 | 调色板按钮打开行内标记面板：8 种颜色 + 16 个 emoji，可取消、可一键清除；文件夹图标染色、名字后跟表情；工具栏「只看标记」可只显示带标记的文件夹 |
+| 10 | 排序 | 工具栏排序按钮循环：名称 → 类型（扩展名分组）→ 大小（大的在前），文件夹始终在前 |
+| 11 | 文件类型一目了然 | 图标按扩展名分类着色（代码 / 文档 / 图片 / PDF / 压缩包 / 表格 / 办公文档），行尾带扩展名小徽标和文件大小 |
+| 12 | 中英文文案 | 跟随 DSH 语言设置 |
+
+## 插入语法（用产品自带的引用语法，不自造标记）
+
+| 内容 | 写进输入框的文本 | 说明 |
+|---|---|---|
+| 文件 | `@src/main.js` | 尾字符不是斜杠 = 文件引用 |
+| 含空格的文件 | `@"my file.txt"` | 引号包裹 |
+| 文件夹 | `@src/components/` | 尾斜杠 = 目录引用 |
+| 含空格的文件夹 | `@"my folder/"` | 斜杠留在引号内 |
+
+模型侧收到的固定说明是「尾斜杠代表目录，需要时列出其内容」，所以插入文件夹等于告诉模型
+"这个位置是目录，可以进去看"。不做任何自定义标记，产品更新后语法照旧。
+
+## 数据结构
+
+| 存储 | 键 | 内容 |
+|---|---|---|
+| 浏览器 `localStorage` | `dsh.project-file-picker.tags.v1` | 按「工作目录 + 相对路径」记录文件夹标记：`{ "<root>": { "<relPath>": { "color": "#hex", "emoji": "🔥" } } }` |
+| 浏览器 `localStorage` | `dsh.project-file-picker.pins.v3` | 收藏（快速访问）：`{ "<sessionId 或 *>": [ { "path": "src/components", "kind": "directory" } ] }`。默认每个对话一格（互不相关）；切成「所有对话共用」时存在 `*` 格里 |
+| 浏览器 `localStorage` | `dsh.project-file-picker.settings.v1` | 面板设置：行高、排序方式、只看标记、收藏是否折叠、最近是否折叠、收藏是否共享 |
+| 浏览器 `localStorage` | `dsh.project-file-picker.view.v1` | 每个对话的浏览位置（展开到哪、滚到哪） |
+| 浏览器 `localStorage` | `dsh.project-file-picker.recent.v1` | 每个对话的「最近使用」，最多 12 条 |
+| 浏览器 `localStorage` | `dsh.project-file-picker.seeded` | 首次自动展开右栏只做一次 |
+
+> 旧版（1.1.0）的固定项存在 `dsh.project-file-picker.pins.v1` 里，是按工作目录分组的。
+> 升级后第一次打开时，属于当前工作目录的那些会**归到当前对话**，然后从旧键里删掉，不会丢。
+
+文件内容本身不缓存、不复制：目录按需读取；面板内预览只读一页文本（最多 400 行），
+其余交给产品自带的预览页签。
+
+## 用到的 Harness 能力
+
+| 能力 | 来源 | 用途 |
+|---|---|---|
+| 列目录 | `ctx.remote.workspaceFiles.list(sessionId, path, signal)` | 逐层展开、递归搜索 |
+| 读文本 | `ctx.remote.workspaceFiles.read(sessionId, path, { offset, limit }, signal)` | 面板内预览 |
+| 资源预览 | `tab.actions.openResource(dsh-resource://file/session/<id>/<path>)` | 眼睛按钮 / 预览页签 |
+| 系统文件管理器 | `ctx.remote.session.openWorkspacePath({ path, action: 'reveal' }, signal)` | 右键「在文件管理器中显示」 |
+| 剪贴板 | 
+avigator.clipboard.writeText（带 textarea 兜底） | 复制路径 / Markdown 链接 |
+| 本地路由 | ctx.webServer.register({ kind: 'exact', path, resource }) | 客户端请 Host 拉起 Obsidian |
+| 子进程 | ctx.subprocess.spawn({ argv, cwd, stdio, graceMs }) | 执行系统打开命令 |
+
+缺失的能力（比如某个 profile 没有 `remote.session`）只会隐藏对应菜单项，不影响其他功能。
+
+## 已知限制
+
+- 收藏、标记、设置、最近使用都存在浏览器 `localStorage`，只在这台机器这个浏览器配置里有效，不随会话同步
+- 收藏默认**按对话各存一套**；需要跨对话就用「快速访问」标题右侧的「本对话 / 共用」开关切换
+- 递归搜索是在客户端自己走目录（产品没提供搜索 API）：有目录数、深度、结果数上限，超大仓库只会扫一部分
+- 目录条目只带 `name / type / size`，没有修改时间，所以排序只有名称 / 类型 / 大小三种
+- 面板内预览只读 UTF-8 文本的前 400 行；二进制、图片、压缩包交给预览页签
+- 只作用于会话工作目录内部，不能浏览工作目录之外的路径
+- 「在 Obsidian 中打开」要 **Host 半**参与：客户端 POST 到本地路由 `/x-project-file-picker/obsidian`，Host 用系统命令（Windows 是 `rundll32 url.dll,FileProtocolHandler`）拉起 `obsidian://`。所以升级这一版要重启 DSH；宿主路由不可用时客户端退回页面直接开协议（Electron 下常被拦）
+- 文件夹只能打开所在 vault，不能聚焦子文件夹；vault 靠目标目录或会话工作目录下的 `.obsidian` 认
+- 插件目录若放在同步盘里，同步客户端可能生成 `locale/zh.sync-conflict-*.json`，导致插件列表的显示名报「包元信息错误」（功能不受影响）。处理办法见排错一节
+
+## 排错
+
+**「包元信息错误：… must use a language id as its filename」**
+
+Harness 读取插件显示名时，会把 `locale/` 下**每个** `*.json` 的文件名当作语言 id 校验
+（`^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$`）。同步盘生成的冲突副本文件名不符合规则，整条元信息就报错
+（插件功能不受影响，只是插件列表里的名称/描述显示不出来）。
+
+处理：删掉 `locale/` 下所有 `*.sync-conflict-*.json`，只保留 `zh.json`、`en.json`，
+重新加载插件列表即可。想彻底避免，把插件目录移出同步盘后再安装。
+
+## 开发与验证
+
+```powershell
+node --check dev/client.js        # 语法检查
+node tests/run.cjs dev/client.js  # 客户端冒烟测试（桩 React，不渲染真实界面）
+node tests/host.mjs dev/index.js  # Host 半冒烟测试（桩 ctx，不启动 DSH）
+```
+
+## 版本
+
+当前版本 **1.6.0**。安装到别的电脑见同目录的 `INSTALL.md`；版本历史见插件库根目录的
+`CHANGELOG.md` 与 `versions/`（不进安装包）。

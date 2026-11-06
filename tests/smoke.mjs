@@ -42,6 +42,8 @@ const reactStub = {
 const storage = new Map();
 /** 被 window.open 打开的地址（Obsidian 协议之类）。 */
 const openedUris = [];
+/** 发到宿主路由的请求。 */
+const fetches = [];
 const windowStub = {
   localStorage: {
     getItem: (key) => (storage.has(key) ? storage.get(key) : null),
@@ -155,6 +157,10 @@ const sandbox = {
   Number,
   JSON,
   encodeURIComponent,
+  fetch: async (url, options) => {
+    fetches.push({ url: url, options: options });
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  },
   navigator: {
     clipboard: {
       writeText: async (text) => {
@@ -470,24 +476,43 @@ if (copies.length !== 1 || copies[0] !== '[a b.txt](<a b.txt>)') throw new Error
 
 // 10. 在 Obsidian 中打开：文件走 path 协议，文件夹先认 .obsidian 再开 vault。
 openedUris.length = 0;
+fetches.length = 0;
 const obsidianFileMenu = renderBody({ menu: { x: 320, y: 140, path: 'F:/demo project/a b.txt', kind: 'file' } });
 const obsidianFileItem = findAll(obsidianFileMenu, (node) => node.props['data-pfp-menu-item'] === 'obsidian')[0];
 if (obsidianFileItem === undefined) throw new Error('the context menu has no Obsidian item');
 obsidianFileItem.props.onClick();
 await new Promise((resolve) => { setTimeout(resolve, 0); });
-if (openedUris.length !== 1) throw new Error('opening a file in Obsidian did not call window.open');
-if (openedUris[0] !== 'obsidian://open?path=F%3A%2Fdemo%20project%2Fa%20b.txt') {
-  throw new Error('unexpected obsidian uri: ' + openedUris[0]);
+if (fetches.length !== 1) throw new Error('opening a file in Obsidian did not call the host route');
+if (fetches[0].url !== '/x-project-file-picker/obsidian') throw new Error('unexpected route: ' + fetches[0].url);
+const filePayload = JSON.parse(fetches[0].options.body);
+if (filePayload.mode !== 'path' || filePayload.target !== 'F:/demo project/a b.txt') {
+  throw new Error('unexpected host payload for a file: ' + JSON.stringify(filePayload));
 }
+if (openedUris.length !== 0) throw new Error('the host route worked, so the page should not try the protocol itself');
 
 listFixture.set('F:/demo project/.obsidian', { entries: [], truncated: false });
 openedUris.length = 0;
+fetches.length = 0;
 const obsidianFolderMenu = renderBody({ menu: { x: 320, y: 140, path: 'F:/demo project/src', kind: 'directory' } });
 findAll(obsidianFolderMenu, (node) => node.props['data-pfp-menu-item'] === 'obsidian')[0].props.onClick();
 await new Promise((resolve) => { setTimeout(resolve, 0); });
-if (openedUris.length !== 1) throw new Error('opening a folder in Obsidian did not call window.open');
-if (openedUris[0] !== 'obsidian://open?vault=demo%20project') {
-  throw new Error('a folder should open its containing vault, got: ' + openedUris[0]);
+if (fetches.length !== 1) throw new Error('opening a folder in Obsidian did not call the host route');
+const folderPayload = JSON.parse(fetches[0].options.body);
+if (folderPayload.mode !== 'vault' || folderPayload.vault !== 'demo project') {
+  throw new Error('a folder should be sent as a vault, got: ' + JSON.stringify(folderPayload));
+}
+
+// 宿主路由不可用时退回页面直开协议。
+const realFetch = sandbox.fetch;
+sandbox.fetch = async () => { throw new Error('route unavailable'); };
+openedUris.length = 0;
+const fallbackMenu = renderBody({ menu: { x: 320, y: 140, path: 'F:/demo project/a b.txt', kind: 'file' } });
+findAll(fallbackMenu, (node) => node.props['data-pfp-menu-item'] === 'obsidian')[0].props.onClick();
+await new Promise((resolve) => { setTimeout(resolve, 0); });
+sandbox.fetch = realFetch;
+if (openedUris.length !== 1) throw new Error('when the host route fails the page should fall back to the protocol');
+if (openedUris[0] !== 'obsidian://open?path=F%3A%2Fdemo%20project%2Fa%20b.txt') {
+  throw new Error('unexpected fallback obsidian uri: ' + openedUris[0]);
 }
 
 // 11. 面板内预览：读一段文本直接显示在面板里。

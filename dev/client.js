@@ -2177,9 +2177,14 @@ window.__ModuleLoader__.load({
       };
 
       /**
-       * 在 Obsidian 中打开：走 obsidian:// 协议，不经过任何后端。
-       * - 文件：用 path 形式，Obsidian 自己找到包含它的 vault 并定位到文件。
-       * - 文件夹：Obsidian 的 URI 只能开 vault，所以先认一下最近一层带 .obsidian 的祖先，
+       * 在 Obsidian 中打开。
+       *
+       * 先请 Host 拉：浏览器直接 `window.open('obsidian://...')` 在 Electron / 严格策略下
+       * 会被悄悄拦掉（点了没反应），所以优先 POST 到 Host 的本地路由，由系统命令拉起。
+       * Host 路由不可用（老版本、非桌面环境）时，再退回页面直接开协议。
+       *
+       * - 文件：path 形式，Obsidian 自己找包含它的 vault 并定位到文件。
+       * - 文件夹：Obsidian 的 URI 只能开 vault，先认一下带 `.obsidian` 的祖先，
        *   有就开那个 vault；认不出来就退回 path 形式碰运气。
        */
       const launchObsidian = async (path, kind) => {
@@ -2187,8 +2192,6 @@ window.__ModuleLoader__.load({
         if (base === undefined) return;
         const absolute = posixOf(path);
         const name = absolute.replace(/\/+$/, '').split('/').pop();
-        const encoded = encodeURIComponent(absolute);
-        let uri = 'obsidian://open?path=' + encoded;
         let vaultName;
 
         if (kind === 'directory') {
@@ -2197,35 +2200,51 @@ window.__ModuleLoader__.load({
           for (const candidate of candidates) {
             if (await directoryExists(candidate + '/.obsidian')) {
               vaultName = posixOf(candidate).replace(/\/+$/, '').split('/').pop();
-              uri = 'obsidian://open?vault=' + encodeURIComponent(vaultName);
               break;
             }
           }
         }
 
-        let opened = false;
+        const payload = vaultName !== undefined && kind === 'directory'
+          ? { mode: 'vault', vault: vaultName }
+          : { mode: 'path', target: absolute };
+
+        // 1) 让 Host 用系统命令拉起。
+        let routed = false;
         try {
-          if (typeof window !== 'undefined' && typeof window.open === 'function') {
-            window.open(uri, '_blank');
-            opened = true;
+          if (typeof fetch === 'function') {
+            const response = await fetch('/x-project-file-picker/obsidian', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            routed = response.ok === true;
           }
         } catch (error) {
-          opened = false;
+          routed = false;
         }
-        if (!opened) {
+
+        // 2) Host 路由不可用时退回页面直接开协议。
+        if (!routed) {
+          const encoded = encodeURIComponent(absolute);
+          const uri = vaultName !== undefined && kind === 'directory'
+            ? 'obsidian://open?vault=' + encodeURIComponent(vaultName)
+            : 'obsidian://open?path=' + encoded;
+          let opened = false;
           try {
-            if (typeof window !== 'undefined' && window.location !== undefined) {
-              window.location.href = uri;
+            if (typeof window !== 'undefined' && typeof window.open === 'function') {
+              window.open(uri, '_blank');
               opened = true;
             }
           } catch (error) {
             opened = false;
           }
+          if (!opened) {
+            setStatus({ message: tr('obsidian.failed'), error: true });
+            return;
+          }
         }
-        if (!opened) {
-          setStatus({ message: tr('obsidian.failed'), error: true });
-          return;
-        }
+
         if (vaultName !== undefined && kind === 'directory') {
           setStatus({ message: tr('obsidian.vaultHint', { vault: vaultName }), error: false });
           return;
