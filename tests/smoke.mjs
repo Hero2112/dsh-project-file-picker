@@ -54,9 +54,13 @@ const windowStub = {
   },
 };
 
+const listCalls = [];
 const remote = {
   workspaceFiles: {
-    list: async () => ({ ok: true, value: { entries: [], truncated: false } }),
+    list: async (sessionId, path) => {
+      listCalls.push({ sessionId, path });
+      return { ok: true, value: { entries: [], truncated: false } };
+    },
   },
 };
 
@@ -439,7 +443,7 @@ if (pinnedNow.length !== 2) throw new Error('pinning a second row did not persis
 if (pinnedNow[0].path !== 'a b.txt' || pinnedNow[0].kind !== 'file') throw new Error('the newest pin should come first: ' + JSON.stringify(pinnedNow));
 if (pinnedNow[1].path !== 'src') throw new Error('the older pin was lost: ' + JSON.stringify(pinnedNow));
 
-// 目录树里的行本身也要显示固定态。
+// 目录树里的行本身也要显示已收藏状态。
 const pinnedTree = renderBody([['F:/demo project'], levelsFixture, '', null, false, {}, null, sessionPins()]);
 const pressed = pinButtons(pinnedTree).filter((node) => node.props['aria-pressed'] === true);
 if (pressed.length !== 2) throw new Error('the pinned rows were not marked as pinned, pressed=' + pressed.length);
@@ -487,16 +491,47 @@ for (const wanted of ['F:/demo project', 'F:/demo project/src', 'F:/demo project
   if (expandedAfter.indexOf(wanted) < 0) throw new Error('the pinned folder did not expand ' + wanted + ': ' + JSON.stringify(expandedAfter));
 }
 
-// 点固定的目录会请求把那一行滚进可见区域。
+// 点收藏的目录会立刻展开整条祖先链、并行把沿途每一层都读起来，并请求滚动定位。
+// 这里故意让 levels 为空，好验证「点一下就把沿途各层读起来」是点击本身发起的。
+const clickTree = renderBody([['F:/demo project'], {}, '', null, false, {}, null, sessionPins()]);
 stateWrites = [];
 calls.length = 0;
-const deepPinRow = findAll(deepPins, (node) => node.props['data-pfp-pin-open'] === 'src/components/widgets')[0];
+listCalls.length = 0;
+const deepPinRow = findAll(clickTree, (node) => node.props['data-pfp-pin-open'] === 'src/components/widgets')[0];
 if (deepPinRow === undefined) throw new Error('the deep pinned folder has no row');
 deepPinRow.props.onClick();
+
+const chainNow = ['F:/demo project', 'F:/demo project/src', 'F:/demo project/src/components', 'F:/demo project/src/components/widgets'];
+const expandOnClick = stateWrites.filter((write) => write.index === 0).pop();
+if (expandOnClick === undefined) throw new Error('clicking a pinned folder did not expand anything');
+const expandedNow = typeof expandOnClick.value === 'function' ? expandOnClick.value([]) : expandOnClick.value;
+for (const wanted of chainNow) {
+  if (expandedNow.indexOf(wanted) < 0) throw new Error('clicking the pinned folder did not expand ' + wanted + ': ' + JSON.stringify(expandedNow));
+}
+// 目录读取是异步发出去的，等一轮事件循环再核对「点了就开始读沿途各层」。
+await new Promise((resolve) => { setTimeout(resolve, 0); });
+const loaded = listCalls.map((call) => call.path);
+for (const wanted of chainNow) {
+  if (loaded.indexOf(wanted) < 0) throw new Error('clicking the pinned folder did not start loading ' + wanted);
+}
+const locatingWrite = stateWrites.filter((write) => write.index === 3).pop();
+if (locatingWrite === undefined || JSON.stringify(locatingWrite.value).indexOf('pin.locating') < 0) {
+  throw new Error('clicking a pinned folder did not report that it is jumping: ' + JSON.stringify(locatingWrite));
+}
 const revealWrite = stateWrites.filter((write) => write.index === 8).pop();
 if (revealWrite === undefined || revealWrite.value === null) throw new Error('clicking a pinned folder did not ask to reveal it');
 if (revealWrite.value.path !== 'F:/demo project/src/components/widgets') throw new Error('the reveal target is wrong: ' + JSON.stringify(revealWrite.value));
 if (calls.length > 0) throw new Error('clicking a pinned folder inserted text instead of opening it');
+
+// 定位到的那一行要闪一下，方便一眼看出跳到哪了。
+const highlightTree = renderBody([[
+  'F:/demo project',
+  'F:/demo project/src',
+  'F:/demo project/src/components',
+], stackedLevels, '', null, false, {}, null, sessionPins(), { path: 'F:/demo project/src/components/widgets', at: 1 }]);
+const hitRows = findAll(highlightTree, (node) => typeof node.props.className === 'string' && node.props.className.indexOf('pfp-rowHit') >= 0);
+if (hitRows.length !== 1) throw new Error('the jumped-to row was not highlighted, rows=' + hitRows.length);
+if (JSON.stringify(hitRows[0]).indexOf('src/components/widgets') < 0) throw new Error('the wrong row got highlighted');
 
 // 固定区的 × 删掉一条；删到最后一条时不留空记录。
 const removable = renderBody([['F:/demo project'], stackedLevels, '', null, false, {}, null, [
@@ -542,5 +577,5 @@ console.log('字典键数      :', zhKeys.length);
 console.log('insert        :', JSON.stringify(fileMention));
 console.log('预览地址      :', opened[0]);
 console.log('标记          : 颜色 + emoji 写入与清除都正常');
-console.log('固定项        : 按对话隔离、写盘、深目录展开、定位、删除、旧数据迁移');
+console.log('快速访问      : 按对话隔离、写盘、点击即展开+预取+定位高亮、删除、旧数据迁移');
 console.log('自动展开      :', JSON.stringify(openTabCalls[0].kind));

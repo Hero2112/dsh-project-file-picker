@@ -1,8 +1,8 @@
 {
   "name": "@local/project-file-picker",
-  "version": "1.3.0-dev.0",
+  "version": "1.4.0-dev.0",
   "private": true,
-  "description": "Browse the project's files in the right sidebar, drop files or folders into the message, preview a file's content, pin a deep folder or a file per conversation, and tag folders with a colour and an emoji. (dev working copy, never installed)",
+  "description": "Browse the project's files in the right sidebar, drop files or folders into the message, preview a file's content, favourite deep folders per conversation with one-click expand-and-jump, and tag folders with a colour and an emoji. (dev working copy, never installed)",
   "type": "module",
   "exports": {
     ".": "./index.js",

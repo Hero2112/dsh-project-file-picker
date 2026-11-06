@@ -66,14 +66,16 @@ window.__ModuleLoader__.load({
       'tag.emoji': '表情',
       'tag.clear': '清除标记',
       'tag.close': '关闭',
-      'pin.button': '固定此位置',
-      'pin.unpin': '取消固定',
-      'pin.section': '固定',
-      'pin.pinned': '已固定 {name}',
-      'pin.unpinned': '已取消固定 {name}',
-      'pin.jumped': '已定位到 {name}',
-      'pin.empty': '还没有固定的位置，点行上的图钉按钮固定',
-      'pin.localOnly': '固定项只属于当前这个对话，换个对话是另一套',
+      'pin.button': '收藏此位置',
+      'pin.unpin': '取消收藏',
+      'pin.section': '快速访问',
+      'pin.pinned': '已收藏 {name}',
+      'pin.unpinned': '已取消收藏 {name}',
+      'pin.jumped': '已跳转到 {name}',
+      'pin.locating': '正在跳转到 {name}…',
+      'pin.empty': '还没有收藏。点目录 / 文件行上的图钉收藏，之后点一下就跳过去',
+      'pin.localOnly': '收藏只属于当前这个对话，换个对话是另一套',
+      'pin.jumpHint': '点一下：展开并跳到这个目录',
       'error.notFound': '目录已不存在',
       'error.outsideWorkspace': '目录在工作区之外',
       'error.notDirectory': '这不是一个目录',
@@ -107,14 +109,16 @@ window.__ModuleLoader__.load({
       'tag.emoji': 'Emoji',
       'tag.clear': 'Clear tags',
       'tag.close': 'Close',
-      'pin.button': 'Pin this location',
-      'pin.unpin': 'Unpin',
-      'pin.section': 'Pinned',
-      'pin.pinned': 'Pinned {name}',
-      'pin.unpinned': 'Unpinned {name}',
+      'pin.button': 'Favourite this location',
+      'pin.unpin': 'Remove from favourites',
+      'pin.section': 'Quick access',
+      'pin.pinned': 'Added {name} to favourites',
+      'pin.unpinned': 'Removed {name} from favourites',
       'pin.jumped': 'Jumped to {name}',
-      'pin.empty': 'Nothing pinned yet — press the pin button on a row',
-      'pin.localOnly': 'Pins belong to this conversation only; other conversations have their own',
+      'pin.locating': 'Jumping to {name}…',
+      'pin.empty': 'No favourites yet — press the pin on a folder or file row to add one',
+      'pin.localOnly': 'Favourites belong to this conversation only; other conversations have their own',
+      'pin.jumpHint': 'Click to expand this folder and jump to it',
       'error.notFound': 'That directory is gone',
       'error.outsideWorkspace': 'That directory is outside the workspace',
       'error.notDirectory': 'That is not a directory',
@@ -189,7 +193,10 @@ window.__ModuleLoader__.load({
       '.pfp-pinPath{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;font-size:11px;color:var(--dsw-alias-label-tertiary)}',
       '.pfp-pinRemove{flex:none;width:20px;height:20px;margin-right:2px;padding:0;line-height:1;font-size:13px;color:var(--dsw-alias-label-tertiary);background:none;border:0;border-radius:var(--dsw-radius-sm,6px);cursor:pointer;opacity:.5}',
       '.pfp-pinItem:hover .pfp-pinRemove{opacity:1}',
+      '.pfp-pinItem:hover .pfp-pinPath{color:var(--dsw-alias-label-secondary)}',
       '.pfp-pinRemove:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-2)}',
+      '.pfp-rowHit{animation:pfp-hit 1.2s ease-out}',
+      '@keyframes pfp-hit{0%{background:var(--dsw-alias-brand-primary-soft,rgba(0,102,255,.22))}60%{background:var(--dsw-alias-brand-primary-soft,rgba(0,102,255,.14))}100%{background:transparent}}',
       '.pfp-rowAction-on{opacity:1;color:var(--dsw-alias-brand-primary)}',
       '.pfp-titleIcon{flex:none;color:var(--dsw-alias-label-tertiary)}',
     ].join('');
@@ -622,8 +629,10 @@ window.__ModuleLoader__.load({
      * 图钉按钮把它的路径固定到列表顶部。
      */
     function FileRow(props) {
-      const { path, label, title, tr, pinned, onInsert, onView, onPin, onDragStart, onDragEnd } = props;
-      return h('div', { className: 'pfp-row pfp-rowFile' }, [
+      const { path, label, title, tr, pinned, highlight, onInsert, onView, onPin, onDragStart, onDragEnd } = props;
+      return h('div', {
+        className: highlight === true ? 'pfp-row pfp-rowFile pfp-rowHit' : 'pfp-row pfp-rowFile',
+      }, [
         h('div', {
           key: 'main',
           role: 'button',
@@ -679,7 +688,7 @@ window.__ModuleLoader__.load({
     function TreeLevel(props) {
       const {
         path, levels, expanded, tr, tagOf, tagEditor, onToggle, onTagToggle, onTagSet, onTagClear,
-        onInsert, onInsertDir, onView, onDragStart, onDragEnd, isPinned, onPin,
+        onInsert, onInsertDir, onView, onDragStart, onDragEnd, isPinned, onPin, highlight,
       } = props;
       const level = levels[path];
       if (level === undefined || level.kind === 'loading') {
@@ -711,6 +720,7 @@ window.__ModuleLoader__.load({
             title: childPath,
             tr: tr,
             pinned: typeof isPinned === 'function' ? isPinned(childPath) : false,
+            highlight: typeof highlight === 'function' ? highlight(childPath) : false,
             onInsert: onInsert,
             onView: onView,
             onPin: onPin,
@@ -720,12 +730,13 @@ window.__ModuleLoader__.load({
           continue;
         }
         const isOpen = expanded.indexOf(childPath) >= 0;
+        const hit = typeof highlight === 'function' ? highlight(childPath) : false;
         const tag = tagOf(childPath);
         const color = tag !== undefined && tag.color !== undefined ? tag.color : undefined;
         const emoji = tag !== undefined && tag.emoji !== undefined ? tag.emoji : undefined;
         const editing = tagEditor === childPath;
         rows.push(h('li', { key: entry.name, className: 'pfp-item' }, [
-          h('div', { key: 'row', className: 'pfp-row' }, [
+          h('div', { key: 'row', className: hit ? 'pfp-row pfp-rowHit' : 'pfp-row' }, [
             h('div', {
               key: 'main',
               role: 'button',
@@ -820,6 +831,7 @@ window.__ModuleLoader__.load({
             onDragEnd: onDragEnd,
             isPinned: isPinned,
             onPin: onPin,
+            highlight: highlight,
           }) : null,
         ]));
       }
@@ -1025,18 +1037,23 @@ window.__ModuleLoader__.load({
         });
       }, [root, pins]);
 
-      // 点了固定项之后，把那一行滚进可见区域；层级还没读出来时保留目标，等下一轮再试。
+      // 点了收藏项之后：
+      // 1) 先把那一行滚进可见区域（目录层还没读完就每 80ms 再试，最多约 2.4 秒）；
+      // 2) 找到的那一行闪一下，让人一眼看到跳到了哪。
       useEffect(() => {
         if (reveal === null) return undefined;
-        const timer = setTimeout(() => {
-          let found = false;
+        let cancelled = false;
+        let timer = 0;
+        let tries = 0;
+        const attempt = () => {
+          if (cancelled) return;
+          let found = null;
           try {
             if (typeof document !== 'undefined') {
               const nodes = document.querySelectorAll('[data-pfp-path]');
               for (const node of nodes) {
                 if (node.getAttribute('data-pfp-path') === reveal.path) {
-                  node.scrollIntoView({ block: 'center' });
-                  found = true;
+                  found = node;
                   break;
                 }
               }
@@ -1044,10 +1061,35 @@ window.__ModuleLoader__.load({
           } catch (error) {
             /* 滚动失败不影响功能 */
           }
-          if (found) setReveal(null);
-        }, 90);
-        return () => clearTimeout(timer);
+          if (found !== null) {
+            try {
+              found.scrollIntoView({ block: 'center' });
+            } catch (error) {
+              /* 有些容器不支持，忽略 */
+            }
+            setStatus({ message: tr('pin.jumped', { name: reveal.path.split('/').pop() }), error: false });
+            // 高亮保持一会儿再撤掉，撤掉之后就不再重试。
+            timer = setTimeout(() => {
+              if (!cancelled) setReveal(null);
+            }, 1000);
+            return;
+          }
+          tries += 1;
+          if (tries >= 30) {
+            setReveal(null);
+            return;
+          }
+          timer = setTimeout(attempt, 80);
+        };
+        timer = setTimeout(attempt, 60);
+        return () => {
+          cancelled = true;
+          clearTimeout(timer);
+        };
       }, [reveal, levels, expanded]);
+
+      /** 当前正被定位的那一行要闪一下。 */
+      const highlightOf = (path) => reveal !== null && reveal.path === posixOf(path);
 
       const reload = () => {
         const paths = expanded.length > 0 ? expanded : root === undefined ? [] : [root];
@@ -1196,23 +1238,26 @@ window.__ModuleLoader__.load({
       };
 
       /**
-       * 点固定区的一行：目录就展开并定位，文件就直接插入引用。
-       * 目录的祖先链要一起展开，否则那一层根本不在树上。
+       * 点收藏区的一行：目录就立刻展开并跳过去，文件就直接插入引用。
+       * 点的瞬间先把沿途每一层的目录读取发出去（并行），再展开、再滚过去，
+       * 不用等一层一层读回来。
        */
       const openPin = (pin) => {
         if (root === undefined) return;
         const absolute = joinPath(root, pin.path);
         if (pin.kind === 'directory') {
           const chain = ancestorChain(root, absolute);
-          setExpanded((prev) => {
-            const next = prev.slice();
-            for (const path of chain) {
-              if (next.indexOf(path) < 0) next.push(path);
-            }
-            return next;
-          });
+          const next = expanded.slice();
+          for (const path of chain) {
+            if (next.indexOf(path) < 0) next.push(path);
+          }
+          setExpanded(next);
+          // 立刻把沿途各层的读取都发出去，别等 effect 一轮轮来。
+          for (const path of chain) {
+            if (levels[path] === undefined) load(path);
+          }
+          setStatus({ message: tr('pin.locating', { name: pin.path.split('/').pop() }), error: false });
           setReveal({ path: absolute, at: Date.now() });
-          setStatus({ message: tr('pin.jumped', { name: pin.path.split('/').pop() }), error: false });
           return;
         }
         insertPath(absolute);
@@ -1379,6 +1424,7 @@ window.__ModuleLoader__.load({
           onDragEnd: onDragEnd,
           isPinned: isPinned,
           onPin: togglePin,
+          highlight: highlightOf,
         });
       }
 
@@ -1400,7 +1446,7 @@ window.__ModuleLoader__.load({
                 key: 'main',
                 type: 'button',
                 className: 'pfp-pinMain',
-                title: pin.path,
+                title: pin.kind === 'directory' ? tr('pin.jumpHint') : pin.path,
                 'data-pfp-pin-open': identity,
                 onClick: () => openPin(pin),
               }, [

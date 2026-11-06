@@ -1,0 +1,3 @@
+- insert:
+    - id: project-file-picker
+      name: '@local/project-file-picker'
