@@ -22,8 +22,26 @@ window.__ModuleLoader__.load({
     const PINS_KEY = 'dsh.project-file-picker.pins.v3';
     /** 早期版本按工作目录分组的旧表，首次读取时归到当前对话。 */
     const LEGACY_PINS_KEY = 'dsh.project-file-picker.pins.v1';
+    /** 「所有对话共用收藏」这个模式下的收藏存放格。 */
+    const SHARED_PINS_SLOT = '*';
+    /** 面板设置（行高、排序、收藏是否共享…），整个 profile 一份。 */
+    const SETTINGS_KEY = 'dsh.project-file-picker.settings.v1';
+    /** 每个对话的浏览位置（展开到哪、滚到哪），按会话存。 */
+    const VIEW_KEY = 'dsh.project-file-picker.view.v1';
+    /** 每个对话的「最近使用」记录。 */
+    const RECENT_KEY = 'dsh.project-file-picker.recent.v1';
     /** 所有文件地址共用的协议与类型前缀。 */
     const FILE_ADDRESS_PREFIX = 'dsh-resource://file/';
+    /** 递归搜索时直接跳过的目录名：基本都是产物或依赖，扫进去只会变慢。 */
+    const SEARCH_SKIP = [
+      'node_modules', '.git', '.svn', '.hg', 'dist', 'build', '.next', '.nuxt', 'out',
+      '.cache', '.venv', 'venv', '__pycache__', 'target', 'obj', 'bin', '.idea', '.vs',
+      'coverage', '.turbo', '.parcel-cache',
+    ];
+    /** 递归搜索的上限，防止在超大仓库里把界面拖死。 */
+    const SEARCH_LIMITS = { dirs: 400, results: 300, depth: 8, concurrent: 4 };
+    /** 面板内预览一次最多读多少行 / 字节。 */
+    const PREVIEW_LIMITS = { lines: 400 };
 
     /** 标记面板给出的文件夹颜色。 */
     const COLORS = [
@@ -44,7 +62,7 @@ window.__ModuleLoader__.load({
       'type.label': '项目文件坞',
       'guide.title': '项目文件坞',
       'guide.description': '浏览项目文件，拖进对话框或点击插入；可预览内容、给文件夹上色',
-      'hint.drag': '拖拽文件或文件夹进输入框；点文件插入、点文件夹展开',
+      'hint.drag': '双击文件插入引用，双击文件夹插入目录；也可以直接拖进输入框',
       'hint.dragging': '松开鼠标，放进输入框',
       noWorkspace: '这个会话还没有工作目录',
       loading: '正在读取…',
@@ -53,6 +71,69 @@ window.__ModuleLoader__.load({
       'noMatch': '没有匹配的文件',
       reload: '重新读取',
       filter: '筛选已加载的文件…',
+      'search.whole': '搜索整个项目',
+      'search.hint': '输入关键字，搜索整个项目…',
+      'search.searching': '搜索中… 已扫 {dirs} 个目录',
+      'search.done': '找到 {n} 个结果（扫了 {dirs} 个目录）',
+      'search.none': '没有找到匹配的文件',
+      'search.limit': '到上限了，结果可能不全',
+      'search.stop': '停止搜索',
+      'sort.name': '按名称排序',
+      'sort.type': '按类型排序',
+      'sort.size': '按大小排序',
+      'sort.state': '排序方式：{mode}',
+      'sort.name.short': '名称',
+      'sort.type.short': '类型',
+      'sort.size.short': '大小',
+      'marked.only': '只看有标记的文件夹',
+      'marked.all': '显示全部',
+      'density.compact': '切到紧凑行高',
+      'density.cozy': '切到舒适行高',
+      'selected.n': '已选 {n} 项',
+      'selected.insert': '插入引用',
+      'selected.inserted': '已插入 {n} 个引用',
+      'selected.clear': '取消选择',
+      'menu.insert': '插入引用',
+      'menu.insertDir': '插入此文件夹',
+      'menu.view': '查看内容（预览页签）',
+      'menu.inline': '在面板里预览',
+      'menu.pin': '收藏',
+      'menu.unpin': '取消收藏',
+      'menu.copyRel': '复制相对路径',
+      'menu.copyAbs': '复制绝对路径',
+      'menu.copyMd': '复制 Markdown 链接',
+      'menu.reveal': '在文件管理器中显示',
+      'menu.tag': '标记颜色和表情',
+      'copied': '已复制{what}',
+      'copyFailed': '复制失败',
+      'revealFailed': '打不开文件管理器',
+      'revealed': '已在文件管理器中显示',
+      'preview.title': '预览',
+      'preview.loading': '正在读取…',
+      'preview.truncated': '只显示前 {n} 行',
+      'preview.openTab': '用预览页签打开',
+      'preview.close': '关闭预览',
+      'preview.failed': '读不了这个文件',
+      'preview.binary': '这是二进制文件，请用预览页签打开',
+      'preview.lines': '{n} 行',
+      'recent.section': '最近',
+      'recent.empty': '还没有最近用过的位置',
+      'recent.clear': '清空最近',
+      'pins.collapse': '收起快速访问',
+      'pins.expand': '展开快速访问',
+      'pins.more': '更多收藏操作',
+      'pins.scopeLocal': '只属于本对话（点一下改成所有对话共用）',
+      'pins.scopeGlobal': '所有对话共用（点一下改成只属于本对话）',
+      'pins.scopeShortLocal': '本对话',
+      'pins.scopeShortGlobal': '共用',
+      'pins.export': '导出收藏',
+      'pins.import': '导入收藏',
+      'pins.imported': '已导入 {n} 条收藏',
+      'pins.importFailed': '导入失败',
+      'pins.exported': '已导出收藏',
+      'pins.moved': '收藏顺序已更新',
+      'pins.sharedOn': '收藏已改成所有对话共用',
+      'pins.sharedOff': '收藏已改成只属于本对话',
       inserted: '已插入 {name}',
       insertedFolder: '已插入文件夹 {name}',
       insertDir: '插入此文件夹',
@@ -87,7 +168,7 @@ window.__ModuleLoader__.load({
       'type.label': 'Project file dock',
       'guide.title': 'Project file dock',
       'guide.description': 'Browse project files, drag or click to insert; preview content and tag folders',
-      'hint.drag': 'Drag a file or folder into the message; click a file to insert it, a folder to open it',
+      'hint.drag': 'Double-click a file to insert it, a folder to insert the directory; dragging works too',
       'hint.dragging': 'Release to drop it into the message',
       noWorkspace: 'This session has no workspace directory',
       loading: 'Reading…',
@@ -96,6 +177,69 @@ window.__ModuleLoader__.load({
       'noMatch': 'No matching files',
       reload: 'Reload',
       filter: 'Filter the loaded files…',
+      'search.whole': 'Search the whole project',
+      'search.hint': 'Type to search the whole project…',
+      'search.searching': 'Searching… {dirs} folders scanned',
+      'search.done': '{n} results ({dirs} folders scanned)',
+      'search.none': 'No matching files',
+      'search.limit': 'Hit the limit; results may be incomplete',
+      'search.stop': 'Stop searching',
+      'sort.name': 'Sort by name',
+      'sort.type': 'Sort by type',
+      'sort.size': 'Sort by size',
+      'sort.state': 'Sorted by {mode}',
+      'sort.name.short': 'name',
+      'sort.type.short': 'type',
+      'sort.size.short': 'size',
+      'marked.only': 'Only folders with a tag',
+      'marked.all': 'Show everything',
+      'density.compact': 'Switch to compact rows',
+      'density.cozy': 'Switch to comfortable rows',
+      'selected.n': '{n} selected',
+      'selected.insert': 'Insert references',
+      'selected.clear': 'Clear selection',
+      'menu.insert': 'Insert reference',
+      'menu.insertDir': 'Insert this folder',
+      'menu.view': 'Open in a preview tab',
+      'menu.inline': 'Preview inside this panel',
+      'menu.pin': 'Add to favourites',
+      'menu.unpin': 'Remove from favourites',
+      'menu.copyRel': 'Copy relative path',
+      'menu.copyAbs': 'Copy absolute path',
+      'menu.copyMd': 'Copy as Markdown link',
+      'menu.reveal': 'Show in file manager',
+      'menu.tag': 'Colour and emoji',
+      'copied': 'Copied {what}',
+      'copyFailed': 'Copy failed',
+      'revealFailed': 'Could not open the file manager',
+      'preview.title': 'Preview',
+      'preview.loading': 'Reading…',
+      'preview.truncated': 'Only the first {n} lines are shown',
+      'preview.openTab': 'Open in a preview tab',
+      'preview.close': 'Close preview',
+      'preview.failed': 'Could not read this file',
+      'preview.binary': 'This is a binary file — use a preview tab',
+      'preview.lines': '{n} lines',
+      'recent.section': 'Recent',
+      'recent.empty': 'Nothing used yet',
+      'recent.clear': 'Clear recent',
+      'pins.collapse': 'Collapse quick access',
+      'pins.expand': 'Expand quick access',
+      'pins.more': 'More favourite actions',
+      'pins.scopeLocal': 'This conversation only (click to share with all conversations)',
+      'pins.scopeGlobal': 'Shared with all conversations (click to use per conversation)',
+      'pins.scopeShortLocal': 'This one',
+      'pins.scopeShortGlobal': 'Shared',
+      'pins.export': 'Export favourites',
+      'pins.import': 'Import favourites',
+      'pins.imported': 'Imported {n} favourites',
+      'pins.importFailed': 'Import failed',
+      'pins.exported': 'Favourites exported',
+      'pins.moved': 'Favourite order updated',
+      'pins.sharedOn': 'Favourites are now shared with all conversations',
+      'pins.sharedOff': 'Favourites are now this conversation only',
+      'selected.inserted': 'Inserted {n} references',
+      revealed: 'Shown in the file manager',
       inserted: 'Inserted {name}',
       insertedFolder: 'Inserted folder {name}',
       insertDir: 'Insert this folder',
@@ -199,6 +343,55 @@ window.__ModuleLoader__.load({
       '@keyframes pfp-hit{0%{background:var(--dsw-alias-brand-primary-soft,rgba(0,102,255,.22))}60%{background:var(--dsw-alias-brand-primary-soft,rgba(0,102,255,.14))}100%{background:transparent}}',
       '.pfp-rowAction-on{opacity:1;color:var(--dsw-alias-brand-primary)}',
       '.pfp-titleIcon{flex:none;color:var(--dsw-alias-label-tertiary)}',
+      '.pfp-filterRow{display:flex;flex:none;align-items:center;gap:4px;padding:8px 6px 4px 16px}',
+      '.pfp-filterRow .pfp-filter{flex:auto;min-width:0}',
+      '.pfp-iconBtn{flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;line-height:1;color:var(--dsw-alias-label-tertiary);background:none;border:1px solid transparent;border-radius:var(--dsw-radius-sm,6px);cursor:pointer}',
+      '.pfp-iconBtn svg{width:14px;height:14px}',
+      '.pfp-iconBtn:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}',
+      '.pfp-iconBtn-on{color:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2)}',
+      '.pfp-item{content-visibility:auto;contain-intrinsic-size:auto 26px}',
+      '.pfp-level{position:relative}',
+      '.pfp-level .pfp-level:before{content:"";position:absolute;left:4px;top:1px;bottom:1px;width:1px;background:var(--dsw-alias-border-l3)}',
+      '.pfp-level>.pfp-item:nth-child(even)>.pfp-row{background:rgba(127,127,127,.045)}',
+      '.pfp-rowSelected,.pfp-level>.pfp-item:nth-child(even)>.pfp-rowSelected{background:var(--dsw-alias-brand-primary-soft,rgba(0,102,255,.16))}',
+      '.pfp-rowSelected:hover{background:var(--dsw-alias-brand-primary-soft,rgba(0,102,255,.22))}',
+      '.pfp-size{flex:none;font-size:10px;color:var(--dsw-alias-label-tertiary);opacity:.85}',
+      '.pfp-extBadge{flex:none;font-size:9px;line-height:1.3;letter-spacing:.02em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary);opacity:.7;padding:0 3px;border-radius:3px;background:var(--dsw-alias-bg-layer-2)}',
+      '.pfp-dense .pfp-rowMain{padding-top:1px;padding-bottom:1px;gap:4px}',
+      '.pfp-dense .pfp-name{font-size:12px}',
+      '.pfp-dense .pfp-item{contain-intrinsic-size:auto 22px}',
+      '.pfp-dense .pfp-level .pfp-level{padding-left:12px}',
+      '.pfp-skeleton{padding:6px 10px}',
+      '.pfp-skeletonRow{height:10px;margin:9px 0;border-radius:4px;background:linear-gradient(90deg,rgba(127,127,127,.10) 0%,rgba(127,127,127,.20) 40%,rgba(127,127,127,.10) 80%);background-size:200% 100%;animation:pfp-shimmer 1.1s linear infinite}',
+      '@keyframes pfp-shimmer{0%{background-position:120% 0}100%{background-position:-40% 0}}',
+      '.pfp-errorBar{display:flex;flex:none;align-items:flex-start;gap:8px;margin:6px 10px 4px 16px;padding:6px 8px;border-radius:6px;background:var(--dsw-alias-state-error-primary-subtle,rgba(229,72,77,.14));color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:1.45}',
+      '.pfp-errorBarText{flex:auto;min-width:0;word-break:break-word}',
+      '.pfp-errorBarClose{flex:none;width:18px;height:18px;padding:0;line-height:1;font-size:13px;color:inherit;background:none;border:0;border-radius:4px;cursor:pointer;opacity:.8}',
+      '.pfp-errorBarClose:hover{opacity:1;background:rgba(127,127,127,.18)}',
+      '.pfp-menu{position:fixed;z-index:60;min-width:196px;padding:4px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-overlay,#fff);box-shadow:0 8px 24px rgba(0,0,0,.18);font-size:12px}',
+      '.pfp-menuItem{display:flex;align-items:center;gap:6px;width:100%;padding:5px 8px;font:inherit;text-align:left;color:var(--dsw-alias-label-primary);background:none;border:0;border-radius:5px;cursor:pointer}',
+      '.pfp-menuItem:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+      '.pfp-menuItem-path{flex:none;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary);font-size:11px}',
+      '.pfp-menuSep{height:1px;margin:4px 6px;background:var(--dsw-alias-border-l3)}',
+      '.pfp-preview{display:flex;flex:none;flex-direction:column;max-height:42%;min-height:80px;border-top:.5px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-bg-layer-1)}',
+      '.pfp-previewHead{display:flex;flex:none;align-items:center;gap:6px;padding:4px 8px 4px 16px;font-size:11px;color:var(--dsw-alias-label-tertiary)}',
+      '.pfp-previewName{flex:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-secondary)}',
+      '.pfp-previewBody{flex:auto;min-height:0;margin:0;padding:4px 10px 8px 16px;overflow:auto;font-family:var(--dsh-font-mono,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-size:11px;line-height:1.5;white-space:pre-wrap;word-break:break-word;color:var(--dsw-alias-label-primary)}',
+      '.pfp-previewNote{padding:8px 16px;color:var(--dsw-alias-label-tertiary);font-size:12px}',
+      '.pfp-pinsActions{display:flex;flex:none;align-items:center;gap:2px;margin-left:auto}' ,
+      '.pfp-pinsActions .pfp-iconBtn{width:20px;height:20px}',
+      '.pfp-pinsActions .pfp-iconBtn svg{width:12px;height:12px}',
+      '.pfp-pinScope{flex:none;font-size:10px;padding:0 4px;border-radius:4px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-tertiary);cursor:pointer;border:0}',
+      '.pfp-pinScope:hover{color:var(--dsw-alias-label-primary)}',
+      '.pfp-pinItem-dragging{opacity:.45}',
+      '.pfp-pinItem-drop{border-top:2px solid var(--dsw-alias-brand-primary)}',
+      '.pfp-pinGrip{flex:none;width:12px;color:var(--dsw-alias-label-tertiary);cursor:grab;opacity:.5}',
+      '.pfp-section{margin-top:2px}',
+      '.pfp-sectionHead{display:flex;align-items:center;gap:4px;padding:2px 8px 2px 4px;color:var(--dsw-alias-label-tertiary);font-size:11px}',
+      '.pfp-sectionHead svg{width:12px;height:12px}',
+      '.pfp-sectionHead .pfp-iconBtn{margin-left:auto;width:18px;height:18px}',
+      '.pfp-selbar{display:flex;flex:none;align-items:center;gap:6px;padding:4px 10px;border-top:.5px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-bg-layer-1);font-size:12px}',
+      '.pfp-selbarText{flex:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-secondary)}',
     ].join('');
 
     const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -260,11 +453,42 @@ window.__ModuleLoader__.load({
       return /\s/u.test(target) ? '@"' + target + '" ' : '@' + target + ' ';
     }
 
-    function sortEntries(entries) {
-      return entries.slice().sort((left, right) => {
-        const group = Number(right.type === 'directory') - Number(left.type === 'directory');
+    /**
+     * 目录排序：文件夹永远在前，其余按模式排。
+     * - name：名称（自然排序）
+     * - type：扩展名分组
+     * - size：从大到小（拿不到大小的排后面）
+     */
+    function sortEntries(entries, mode) {
+      const list = entries.slice();
+      const directoryFirst = (left, right) => Number(right.type === 'directory') - Number(left.type === 'directory');
+      if (mode === 'type') {
+        list.sort((left, right) => {
+          const group = directoryFirst(left, right);
+          if (group !== 0) return group;
+          const leftExt = fileKindOf(left.name).ext;
+          const rightExt = fileKindOf(right.name).ext;
+          if (leftExt === rightExt) return collator.compare(left.name, right.name);
+          return collator.compare(leftExt, rightExt);
+        });
+        return list;
+      }
+      if (mode === 'size') {
+        list.sort((left, right) => {
+          const group = directoryFirst(left, right);
+          if (group !== 0) return group;
+          const leftSize = typeof left.size === 'number' ? left.size : -1;
+          const rightSize = typeof right.size === 'number' ? right.size : -1;
+          if (leftSize === rightSize) return collator.compare(left.name, right.name);
+          return rightSize - leftSize;
+        });
+        return list;
+      }
+      list.sort((left, right) => {
+        const group = directoryFirst(left, right);
         return group !== 0 ? group : collator.compare(left.name, right.name);
       });
+      return list;
     }
 
     /** Component-encode one id or path segment, keeping `:` literal for drive letters. */
@@ -402,6 +626,29 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** 把一份收藏写进指定格子，别的格子原样保留。 */
+    function writePinsToSlot(slot, list) {
+      let map = {};
+      try {
+        const raw = window.localStorage.getItem(PINS_KEY);
+        const parsed = raw === null || raw === undefined || raw === '' ? {} : JSON.parse(raw);
+        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) map = parsed;
+      } catch (error) {
+        map = {};
+      }
+      if (Array.isArray(list) && list.length > 0) map[slot] = list;
+      else delete map[slot];
+      writeSessionPins(map);
+    }
+
+    /** 远程调用统一回 `{ ok, value }` 信封；这里统一拆成值或 undefined。 */
+    function unpackRemote(result) {
+      if (result === undefined || result === null) return undefined;
+      if (result.ok === true) return result.value;
+      if (result.ok === false) return undefined;
+      return result;
+    }
+
     /** 两条固定记录是否是同一个位置。 */
     function samePin(left, right) {
       return left.path === right.path;
@@ -410,6 +657,260 @@ window.__ModuleLoader__.load({
     /** 固定项的稳定标识：同时用于 React key 和测试里的 data 属性。 */
     function pinKey(pin) {
       return pin.path;
+    }
+
+    /** 面板默认设置。 */
+    const DEFAULT_SETTINGS = {
+      density: 'cozy',
+      pinsCollapsed: false,
+      sharedPins: false,
+      sort: 'name',
+      markedOnly: false,
+      recentCollapsed: false,
+    };
+
+    /** 读一个 JSON 对象；坏数据或存储被禁用时返回空对象。 */
+    function readJsonObject(key) {
+      try {
+        const raw = window.localStorage.getItem(key);
+        if (raw === null || raw === undefined || raw === '') return {};
+        const parsed = JSON.parse(raw);
+        return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      } catch (error) {
+        return {};
+      }
+    }
+
+    /** 写一个 JSON 对象；存储被禁用时只是丢了持久化。 */
+    function writeJsonObject(key, value) {
+      try {
+        window.localStorage.setItem(key, JSON.stringify(value));
+      } catch (error) {
+        /* 忽略 */
+      }
+    }
+
+    /** 读取面板设置，缺的项用默认值补齐。 */
+    function readSettings() {
+      const stored = readJsonObject(SETTINGS_KEY);
+      const merged = {};
+      for (const key of Object.keys(DEFAULT_SETTINGS)) {
+        merged[key] = stored[key] === undefined ? DEFAULT_SETTINGS[key] : stored[key];
+      }
+      return merged;
+    }
+
+    /** 每个对话一份的浏览位置（展开到哪、滚到哪）。 */
+    function readViewState(slot, root) {
+      const stored = readJsonObject(VIEW_KEY)[slot];
+      if (stored === null || stored === undefined || typeof stored !== 'object') return undefined;
+      const expanded = Array.isArray(stored.expanded) ? stored.expanded.filter((item) => typeof item === 'string') : [];
+      const scrollTop = typeof stored.scrollTop === 'number' ? stored.scrollTop : 0;
+      if (expanded.length === 0) return undefined;
+      // 换过工作目录的旧位置没有意义。
+      const base = root === undefined || root === null ? '' : posixOf(root).replace(/\/+$/, '');
+      if (base !== '' && expanded.every((item) => String(item).indexOf(base) !== 0)) return undefined;
+      return { expanded: expanded, scrollTop: scrollTop };
+    }
+
+    function writeViewState(slot, value) {
+      const map = readJsonObject(VIEW_KEY);
+      map[slot] = value;
+      writeJsonObject(VIEW_KEY, map);
+    }
+
+    /** 读取某个对话的「最近使用」列表。 */
+    function readRecent(slot) {
+      const stored = readJsonObject(RECENT_KEY)[slot];
+      if (!Array.isArray(stored)) return [];
+      const list = [];
+      const seen = new Set();
+      for (const item of stored) {
+        const pin = normalizePin(item);
+        if (pin === undefined) continue;
+        if (seen.has(pin.path)) continue;
+        seen.add(pin.path);
+        list.push(pin);
+      }
+      return list.slice(0, 12);
+    }
+
+    function writeRecent(slot, list) {
+      const map = readJsonObject(RECENT_KEY);
+      map[slot] = list.slice(0, 12);
+      writeJsonObject(RECENT_KEY, map);
+    }
+
+    /** 文件类型分组：只用来给图标上色和显示小徽标。 */
+    const FILE_KINDS = [
+      { id: 'md', color: '#8e4ec6', exts: ['md', 'markdown', 'mdx', 'txt', 'rst', 'adoc', 'log'] },
+      {
+        id: 'code',
+        color: '#0091ff',
+        exts: [
+          'js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'py', 'go', 'rs', 'java', 'kt', 'c', 'h', 'cc',
+          'cpp', 'hpp', 'cs', 'rb', 'php', 'swift', 'lua', 'sh', 'bash', 'zsh', 'ps1', 'bat', 'cmd',
+          'html', 'htm', 'css', 'scss', 'less', 'vue', 'svelte', 'json', 'jsonc', 'yaml', 'yml',
+          'toml', 'ini', 'conf', 'env', 'xml', 'sql', 'graphql', 'gql', 'dart', 'r', 'scala',
+        ],
+      },
+      { id: 'image', color: '#12a594', exts: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'] },
+      { id: 'pdf', color: '#e5484d', exts: ['pdf'] },
+      { id: 'archive', color: '#e2a336', exts: ['zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'bz2', 'xz', 'zst'] },
+      { id: 'data', color: '#30a46c', exts: ['csv', 'tsv', 'xls', 'xlsx', 'parquet', 'db', 'sqlite', 'sqlite3'] },
+      { id: 'doc', color: '#f76b15', exts: ['doc', 'docx', 'ppt', 'pptx', 'odt', 'odp', 'rtf', 'epub'] },
+    ];
+
+    /** 某个文件名属于哪一类（用于图标染色、徽标、预览判断）。 */
+    function fileKindOf(name) {
+      const base = posixOf(name === undefined || name === null ? '' : name).split('/').pop();
+      const dot = base.lastIndexOf('.');
+      const ext = dot > 0 ? base.slice(dot + 1).toLowerCase() : '';
+      for (const kind of FILE_KINDS) {
+        if (kind.exts.indexOf(ext) >= 0) return { id: kind.id, color: kind.color, ext: ext };
+      }
+      return { id: 'other', color: undefined, ext: ext };
+    }
+
+    /** 把字节数变成人看的单位。 */
+    function formatSize(bytes) {
+      if (typeof bytes !== 'number' || !isFinite(bytes) || bytes < 0) return undefined;
+      if (bytes < 1024) return bytes + ' B';
+      const units = ['KB', 'MB', 'GB', 'TB'];
+      let value = bytes / 1024;
+      let index = 0;
+      while (value >= 1024 && index < units.length - 1) {
+        value /= 1024;
+        index += 1;
+      }
+      return (value >= 10 ? Math.round(value) : value.toFixed(1)) + ' ' + units[index];
+    }
+
+    /** 相对路径转 Markdown 链接；带空格的用尖括号包起来。 */
+    function markdownLinkFor(label, relative) {
+      const path = posixOf(relative);
+      return '[' + label + '](' + (/\s/u.test(path) ? '<' + path + '>' : path) + ')';
+    }
+
+    /** 复制文本：优先用剪贴板 API，不行再退回临时 textarea。 */
+    async function copyText(text) {
+      try {
+        if (typeof navigator !== 'undefined' && navigator.clipboard !== undefined
+          && typeof navigator.clipboard.writeText === 'function') {
+          await navigator.clipboard.writeText(text);
+          return true;
+        }
+      } catch (error) {
+        /* 落到下面的兜底 */
+      }
+      try {
+        if (typeof document !== 'undefined' && document.body !== undefined) {
+          const area = document.createElement('textarea');
+          area.value = text;
+          area.setAttribute('readonly', '');
+          area.style.position = 'fixed';
+          area.style.opacity = '0';
+          document.body.appendChild(area);
+          area.select();
+          const ok = document.execCommand('copy');
+          area.remove();
+          return ok === true;
+        }
+      } catch (error) {
+        /* 放弃 */
+      }
+      return false;
+    }
+
+    /** 把 JSON 存成文件下载下来；环境不支持时返回 false。 */
+    function downloadJson(fileName, data) {
+      try {
+        if (typeof document === 'undefined' || typeof Blob === 'undefined' || typeof URL === 'undefined') return false;
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => {
+          try {
+            URL.revokeObjectURL(url);
+          } catch (error) {
+            /* 忽略 */
+          }
+        }, 4000);
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+
+    /**
+     * 递归搜索整个工作目录：按层广度优先，每层并发几个目录，
+     * 跳过 node_modules / dist 这类目录，并给目录数、深度、结果数设上限。
+     * 每一波结束回报一次进度，方便界面显示「已扫多少个目录」。
+     */
+    async function searchProject(list, sessionId, root, needle, signal, onProgress) {
+      const lower = needle.trim().toLowerCase();
+      const results = [];
+      let scanned = 0;
+      let truncated = false;
+      if (lower === '') return { results: results, scanned: scanned, truncated: truncated };
+
+      let wave = [{ path: posixOf(root), depth: 0 }];
+      while (wave.length > 0 && !signal.aborted) {
+        const next = [];
+        for (let start = 0; start < wave.length; start += SEARCH_LIMITS.concurrent) {
+          if (signal.aborted) break;
+          const chunk = wave.slice(start, start + SEARCH_LIMITS.concurrent);
+          const listings = await Promise.all(chunk.map(async (item) => {
+            if (scanned >= SEARCH_LIMITS.dirs) {
+              truncated = true;
+              return undefined;
+            }
+            scanned += 1;
+            try {
+              const result = await list(sessionId, item.path, signal);
+              return result !== undefined && result !== null && result.ok === true
+                ? { item: item, value: result.value || {} }
+                : undefined;
+            } catch (error) {
+              return undefined;
+            }
+          }));
+
+          for (const listing of listings) {
+            if (listing === undefined) continue;
+            const entries = Array.isArray(listing.value.entries) ? listing.value.entries : [];
+            for (const entry of entries) {
+              const childPath = joinPath(listing.item.path, entry.name);
+              if (entry.type === 'directory') {
+                if (listing.item.depth + 1 > SEARCH_LIMITS.depth) continue;
+                if (SEARCH_SKIP.indexOf(String(entry.name).toLowerCase()) >= 0) continue;
+                next.push({ path: childPath, depth: listing.item.depth + 1 });
+              } else if (entry.type === 'file') {
+                if (relativeTo(root, childPath).toLowerCase().indexOf(lower) < 0) continue;
+                if (results.length >= SEARCH_LIMITS.results) {
+                  truncated = true;
+                  continue;
+                }
+                results.push({
+                  path: childPath,
+                  name: entry.name,
+                  size: typeof entry.size === 'number' ? entry.size : undefined,
+                });
+              }
+            }
+          }
+          if (onProgress !== undefined) onProgress({ scanned: scanned, results: results.length });
+        }
+        wave = next;
+      }
+
+      results.sort((left, right) => collator.compare(left.path, right.path));
+      return { results: results, scanned: scanned, truncated: truncated };
     }
 
     /**
@@ -469,12 +970,14 @@ window.__ModuleLoader__.load({
       }));
     }
 
-    /** 文件图标。 */
+    /** 文件图标；color 是按扩展名分类后给的颜色。 */
     function FileGlyph(props) {
       const size = props !== undefined && props.size !== undefined ? props.size : 15;
+      const color = props !== undefined && props.color !== undefined ? props.color : undefined;
       return h('svg', {
         viewBox: '0 0 16 16', width: size, height: size, 'aria-hidden': true,
         className: 'pfp-icon',
+        style: color === undefined ? undefined : { color: color },
       }, [
         h('path', {
           key: 'sheet',
@@ -572,6 +1075,79 @@ window.__ModuleLoader__.load({
       ]);
     }
 
+    /** 放大镜：切到「搜索整个项目」。 */
+    function SearchGlyph() {
+      return h('svg', { viewBox: '0 0 16 16', width: 14, height: 14, 'aria-hidden': true }, [
+        h('circle', { key: 'ring', cx: 6.8, cy: 6.8, r: 4.2, fill: 'none', stroke: 'currentColor', strokeWidth: 1.3 }),
+        h('path', { key: 'stem', d: 'M10 10l3.6 3.6', fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round' }),
+      ]);
+    }
+
+    /** 排序：上下的箭头。 */
+    function SortGlyph() {
+      return h('svg', { viewBox: '0 0 16 16', width: 14, height: 14, 'aria-hidden': true }, [
+        h('path', { key: 'up', d: 'M5 6.4 8 3.2l3 3.2', fill: 'none', stroke: 'currentColor', strokeWidth: 1.3, strokeLinejoin: 'round' }),
+        h('path', { key: 'down', d: 'M5 9.6 8 12.8l3-3.2', fill: 'none', stroke: 'currentColor', strokeWidth: 1.3, strokeLinejoin: 'round' }),
+      ]);
+    }
+
+    /** 行高：两道长短不一的横线。 */
+    function DensityGlyph() {
+      return h('svg', { viewBox: '0 0 16 16', width: 14, height: 14, 'aria-hidden': true }, [
+        h('path', { key: 'a', d: 'M2.6 4.4h10.8', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round' }),
+        h('path', { key: 'b', d: 'M2.6 8h7.6', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round' }),
+        h('path', { key: 'c', d: 'M2.6 11.6h10.8', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round' }),
+      ]);
+    }
+
+    /** 只看标记：一个小色块加勾。 */
+    function MarkedGlyph() {
+      return h('svg', { viewBox: '0 0 16 16', width: 14, height: 14, 'aria-hidden': true }, [
+        h('rect', { key: 'box', x: 2.4, y: 2.4, width: 11.2, height: 11.2, rx: 2.4, fill: 'none', stroke: 'currentColor', strokeWidth: 1.2 }),
+        h('path', { key: 'tick', d: 'M5.4 8.2 7.3 10l3.4-3.6', fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+      ]);
+    }
+
+    /** 导出：向下的箭头落进托盘。 */
+    function DownloadGlyph() {
+      return h('svg', { viewBox: '0 0 16 16', width: 12, height: 12, 'aria-hidden': true }, [
+        h('path', { key: 'arrow', d: 'M8 2.6v6.2M5.4 6.4 8 9l2.6-2.6', fill: 'none', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+        h('path', { key: 'tray', d: 'M2.8 10.4v2.2h10.4v-2.2', fill: 'none', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round' }),
+      ]);
+    }
+
+    /** 导入：向上的箭头从托盘里出来。 */
+    function UploadGlyph() {
+      return h('svg', { viewBox: '0 0 16 16', width: 12, height: 12, 'aria-hidden': true }, [
+        h('path', { key: 'arrow', d: 'M8 9V2.8M5.4 5.4 8 2.8l2.6 2.6', fill: 'none', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+        h('path', { key: 'tray', d: 'M2.8 10.4v2.2h10.4v-2.2', fill: 'none', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round' }),
+      ]);
+    }
+
+    /** 拖拽手柄：两列小点。 */
+    function GripGlyph() {
+      return h('svg', { viewBox: '0 0 8 16', width: 8, height: 14, 'aria-hidden': true }, [
+        h('circle', { key: 'a', cx: 2.4, cy: 4.4, r: 1, fill: 'currentColor' }),
+        h('circle', { key: 'b', cx: 5.6, cy: 4.4, r: 1, fill: 'currentColor' }),
+        h('circle', { key: 'c', cx: 2.4, cy: 8, r: 1, fill: 'currentColor' }),
+        h('circle', { key: 'd', cx: 5.6, cy: 8, r: 1, fill: 'currentColor' }),
+        h('circle', { key: 'e', cx: 2.4, cy: 11.6, r: 1, fill: 'currentColor' }),
+        h('circle', { key: 'f', cx: 5.6, cy: 11.6, r: 1, fill: 'currentColor' }),
+      ]);
+    }
+
+    /** 折叠 / 展开的小三角，向下表示展开。 */
+    function CaretGlyph(props) {
+      const open = props !== undefined && props.open === true;
+      return h('svg', {
+        viewBox: '0 0 12 12', width: 12, height: 12, 'aria-hidden': true,
+        className: open ? 'pfp-chevron pfp-chevron-open' : 'pfp-chevron',
+      }, h('path', {
+        d: 'M4 2.6 8 6l-4 3.4',
+        fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round',
+      }));
+    }
+
     function failureText(tr, failure) {
       const code = failure !== undefined && failure !== null ? failure.code : undefined;
       if (code === 'workspace-file/not-found') return tr('error.notFound');
@@ -625,14 +1201,20 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 一个文件行：点击插入引用，眼睛按钮打开产品自带的预览，
-     * 图钉按钮把它的路径固定到列表顶部。
+     * 一个文件行：单击选中、双击插入引用；眼睛按钮打开产品自带的预览，
+     * 图钉按钮收藏，右键出菜单。拖拽也还能用。
      */
     function FileRow(props) {
-      const { path, label, title, tr, pinned, highlight, onInsert, onView, onPin, onDragStart, onDragEnd } = props;
-      return h('div', {
-        className: highlight === true ? 'pfp-row pfp-rowFile pfp-rowHit' : 'pfp-row pfp-rowFile',
-      }, [
+      const {
+        path, label, title, tr, pinned, selected, highlight, size,
+        onSelect, onInsert, onView, onPin, onContextMenu, onDragStart, onDragEnd,
+      } = props;
+      const kind = fileKindOf(label);
+      const className = 'pfp-row pfp-rowFile'
+        + (selected === true ? ' pfp-rowSelected' : '')
+        + (highlight === true ? ' pfp-rowHit' : '');
+      const sizeText = formatSize(size);
+      return h('div', { className: className }, [
         h('div', {
           key: 'main',
           role: 'button',
@@ -641,9 +1223,11 @@ window.__ModuleLoader__.load({
           className: 'pfp-rowMain',
           title: title,
           'data-pfp-path': posixOf(path),
-          onClick: () => onInsert(path),
+          onClick: (event) => onSelect(path, 'file', event),
+          onDoubleClick: () => onInsert(path),
+          onContextMenu: (event) => onContextMenu(event, path, 'file'),
           onKeyDown: (event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
+            if (event.key === 'Enter') {
               event.preventDefault();
               onInsert(path);
             }
@@ -651,8 +1235,10 @@ window.__ModuleLoader__.load({
           onDragStart: (event) => onDragStart(event, path, 'file'),
           onDragEnd: () => onDragEnd(),
         }, [
-          h(FileGlyph, { key: 'icon' }),
+          h(FileGlyph, { key: 'icon', color: kind.color }),
           h('span', { key: 'name', className: 'pfp-name' }, label),
+          kind.ext === '' ? null : h('span', { key: 'ext', className: 'pfp-extBadge' }, kind.ext),
+          sizeText === undefined ? null : h('span', { key: 'size', className: 'pfp-size' }, sizeText),
         ]),
         h('button', {
           key: 'pin',
@@ -684,20 +1270,36 @@ window.__ModuleLoader__.load({
     /**
      * 一个目录层级：path 这一层的条目，
      * 以及所有已展开子目录各自的层级。
+     *
+     * 行上的交互：单击选中（文件夹同时展开 / 收起），双击插入，右键出菜单。
      */
     function TreeLevel(props) {
       const {
         path, levels, expanded, tr, tagOf, tagEditor, onToggle, onTagToggle, onTagSet, onTagClear,
         onInsert, onInsertDir, onView, onDragStart, onDragEnd, isPinned, onPin, highlight,
+        isSelected, onSelect, onContextMenu, sortMode, markedOnly,
       } = props;
       const level = levels[path];
       if (level === undefined || level.kind === 'loading') {
-        return h('p', { className: 'pfp-note' }, tr('loading'));
+        return h('div', { className: 'pfp-skeleton', 'aria-hidden': true }, [
+          h('div', { key: 'a', className: 'pfp-skeletonRow', style: { width: '72%' } }),
+          h('div', { key: 'b', className: 'pfp-skeletonRow', style: { width: '54%' } }),
+          h('div', { key: 'c', className: 'pfp-skeletonRow', style: { width: '64%' } }),
+        ]);
       }
       if (level.kind === 'failed') {
         return h('p', { className: 'pfp-note pfp-note-error' }, failureText(tr, level.error));
       }
-      const entries = sortEntries(level.entries);
+      const all = sortEntries(level.entries, sortMode);
+      const entries = [];
+      for (const entry of all) {
+        if (markedOnly === true) {
+          if (entry.type !== 'directory') continue;
+          const tag = tagOf(joinPath(path, entry.name));
+          if (tag === undefined || (tag.color === undefined && tag.emoji === undefined)) continue;
+        }
+        entries.push(entry);
+      }
       const rows = [];
       if (entries.length === 0) {
         rows.push(h('li', { key: '__empty', className: 'pfp-item' }, h('p', { className: 'pfp-note' }, tr('empty'))));
@@ -720,10 +1322,14 @@ window.__ModuleLoader__.load({
             title: childPath,
             tr: tr,
             pinned: typeof isPinned === 'function' ? isPinned(childPath) : false,
+            selected: typeof isSelected === 'function' ? isSelected(childPath) : false,
             highlight: typeof highlight === 'function' ? highlight(childPath) : false,
+            size: entry.size,
+            onSelect: onSelect,
             onInsert: onInsert,
             onView: onView,
             onPin: onPin,
+            onContextMenu: onContextMenu,
             onDragStart: onDragStart,
             onDragEnd: onDragEnd,
           })));
@@ -731,12 +1337,16 @@ window.__ModuleLoader__.load({
         }
         const isOpen = expanded.indexOf(childPath) >= 0;
         const hit = typeof highlight === 'function' ? highlight(childPath) : false;
+        const chosen = typeof isSelected === 'function' ? isSelected(childPath) : false;
         const tag = tagOf(childPath);
         const color = tag !== undefined && tag.color !== undefined ? tag.color : undefined;
         const emoji = tag !== undefined && tag.emoji !== undefined ? tag.emoji : undefined;
         const editing = tagEditor === childPath;
+        const rowClass = 'pfp-row'
+          + (chosen ? ' pfp-rowSelected' : '')
+          + (hit ? ' pfp-rowHit' : '');
         rows.push(h('li', { key: entry.name, className: 'pfp-item' }, [
-          h('div', { key: 'row', className: hit ? 'pfp-row pfp-rowHit' : 'pfp-row' }, [
+          h('div', { key: 'row', className: rowClass }, [
             h('div', {
               key: 'main',
               role: 'button',
@@ -746,9 +1356,14 @@ window.__ModuleLoader__.load({
               title: childPath,
               'data-pfp-path': posixOf(childPath),
               'aria-expanded': isOpen,
-              onClick: () => onToggle(childPath),
+              onClick: (event) => {
+                onSelect(childPath, 'directory', event);
+                onToggle(childPath);
+              },
+              onDoubleClick: () => onInsertDir(childPath),
+              onContextMenu: (event) => onContextMenu(event, childPath, 'directory'),
               onKeyDown: (event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
+                if (event.key === 'Enter') {
                   event.preventDefault();
                   onToggle(childPath);
                 }
@@ -832,6 +1447,11 @@ window.__ModuleLoader__.load({
             isPinned: isPinned,
             onPin: onPin,
             highlight: highlight,
+            isSelected: isSelected,
+            onSelect: onSelect,
+            onContextMenu: onContextMenu,
+            sortMode: sortMode,
+            markedOnly: markedOnly,
           }) : null,
         ]));
       }
@@ -901,6 +1521,8 @@ window.__ModuleLoader__.load({
       const useSessions = props.useSessions;
       const inputActions = props.inputActions;
       const listDirectory = props.listDirectory;
+      const readFile = props.readFile;
+      const openPath = props.openPath;
       const { tab } = props.useTabInfo();
       const draft = props.useInput((input) => (input !== undefined && input !== null ? input.draft : ''));
 
@@ -910,24 +1532,51 @@ window.__ModuleLoader__.load({
         return summary !== undefined && summary !== null ? summary.cwd : undefined;
       });
       const root = cwd === undefined || cwd === null ? undefined : posixOf(cwd);
+      /** 收藏 / 最近 / 浏览位置用哪个格子：按对话，或者所有对话共用一个格子。 */
+      const sessionSlot = String(sessionId === undefined || sessionId === null ? '' : sessionId);
 
-      const [expanded, setExpanded] = useState([]);
+      const initialSettings = readSettings();
+      const [settings, setSettings] = useState(initialSettings);
+      const [expanded, setExpanded] = useState(() => {
+        const saved = readViewState(sessionSlot, root);
+        if (saved !== undefined) return saved.expanded;
+        return root === undefined ? [] : [root];
+      });
       const [levels, setLevels] = useState({});
       const [filter, setFilter] = useState('');
       const [status, setStatus] = useState(null);
+      const [errorHidden, setErrorHidden] = useState(false);
       const [dragging, setDragging] = useState(false);
       const [tags, setTags] = useState(() => readTags());
       const [tagEditor, setTagEditor] = useState(null);
-      const [pins, setPins] = useState(() => readSessionPins(sessionId, root));
+      const pinsSlot = settings.sharedPins === true ? SHARED_PINS_SLOT : sessionSlot;
+      const [pins, setPins] = useState(() => readSessionPins(pinsSlot, root));
       /** 防御一句：万一状态被写成别的形状，就按空表用，别整页崩掉。 */
       const pinList = Array.isArray(pins) ? pins : [];
       const [reveal, setReveal] = useState(null);
+      const [selected, setSelected] = useState([]);
+      const [menu, setMenu] = useState(null);
+      const [preview, setPreview] = useState(null);
+      const [searchMode, setSearchMode] = useState(false);
+      const [search, setSearch] = useState(null);
+      const [recent, setRecent] = useState(() => readRecent(sessionSlot));
+      const [pinDrag, setPinDrag] = useState(null);
 
       const controllers = useRef(new Map());
       const listApi = useRef(listDirectory);
       const inputRef = useRef(inputActions);
       const rootRef = useRef(root);
       const reloadRef = useRef(null);
+      const bodyRef = useRef(null);
+      const searchRef = useRef(null);
+      const previewRef = useRef(null);
+      const searchIdRef = useRef(0);
+      const importRef = useRef(null);
+      const lastScrollRef = useRef(0);
+      const scrollTimerRef = useRef(0);
+      const restoredScrollRef = useRef(false);
+      const expandedRef = useRef(expanded);
+      expandedRef.current = expanded;
       listApi.current = listDirectory;
       inputRef.current = inputActions;
       rootRef.current = root;
@@ -989,14 +1638,23 @@ window.__ModuleLoader__.load({
         abortAll();
       }, []);
 
-      // 工作目录变了就重开一棵树。
+      // 工作目录变了就重开一棵树：能读到上次的浏览位置就照它恢复，否则只展开根。
       useEffect(() => {
         abortAll();
         setLevels({});
         setFilter('');
         setStatus(null);
         setTagEditor(null);
-        setExpanded(root === undefined ? [] : [root]);
+        setSelected([]);
+        setPreview(null);
+        restoredScrollRef.current = false;
+        lastScrollRef.current = 0;
+        if (root === undefined) {
+          setExpanded([]);
+          return;
+        }
+        const saved = readViewState(sessionSlot, root);
+        setExpanded(saved !== undefined ? saved.expanded : [root]);
       }, [root]);
 
       useEffect(() => {
@@ -1006,11 +1664,15 @@ window.__ModuleLoader__.load({
         }
       }, [root, expanded, levels]);
 
-      // 固定项是每个对话自己的一套：会话（或工作目录）变了就重新读这一份，
-      // 别的对话的固定项不会串过来。
+      // 收藏按「格子」读：默认每个对话一格，设置成共享时所有对话读同一格。
       useEffect(() => {
-        setPins(readSessionPins(sessionId, rootRef.current));
-      }, [sessionId, root]);
+        setPins(readSessionPins(pinsSlot, rootRef.current));
+      }, [pinsSlot, root]);
+
+      // 最近使用也按对话记。
+      useEffect(() => {
+        setRecent(readRecent(sessionSlot));
+      }, [sessionSlot]);
 
       // 固定过的目录，在刷新页面或切回这个对话后自动展开到那一层，
       // 这样固定的深目录一打开就是原地状态。
@@ -1150,6 +1812,7 @@ window.__ModuleLoader__.load({
           draft: draft,
           tr: tr,
         }));
+        remember(path, kind === 'directory' ? 'directory' : 'file');
       };
 
       const insertPath = (path) => insertEntry(path, 'file');
@@ -1163,6 +1826,7 @@ window.__ModuleLoader__.load({
           if (typeof tab.actions.openResource !== 'function') throw new Error('no resource opener');
           tab.actions.openResource(fileAddressFor(sessionId, base, path));
           setStatus({ message: tr('view.opened', { name: posixOf(path).split('/').pop() }), error: false });
+          remember(path, 'file');
         } catch (error) {
           setStatus({ message: tr('viewFailed'), error: true });
         }
@@ -1193,9 +1857,9 @@ window.__ModuleLoader__.load({
         return false;
       };
 
-      // 写固定项：只改当前对话那一格，整张表其余对话的原样保留。
+      // 写收藏：只改当前格子，整张表其余格子的原样保留。
       const savePins = (list) => {
-        const key = String(sessionId === undefined || sessionId === null ? '' : sessionId);
+        const key = pinsSlot;
         let map = {};
         try {
           const raw = window.localStorage.getItem(PINS_KEY);
@@ -1258,6 +1922,7 @@ window.__ModuleLoader__.load({
           }
           setStatus({ message: tr('pin.locating', { name: pin.path.split('/').pop() }), error: false });
           setReveal({ path: absolute, at: Date.now() });
+          remember(absolute, 'directory');
           return;
         }
         insertPath(absolute);
@@ -1294,6 +1959,351 @@ window.__ModuleLoader__.load({
 
       const clearTag = (path) => {
         writeTag(path, { color: undefined, emoji: undefined });
+      };
+
+      // ── 面板设置：行高、排序、只看标记、收藏是否共享 ──────────────────
+      const saveSettings = (patch) => {
+        const next = Object.assign({}, settings, patch);
+        setSettings(next);
+        writeJsonObject(SETTINGS_KEY, next);
+      };
+
+      const toggleDensity = () => {
+        saveSettings({ density: settings.density === 'dense' ? 'cozy' : 'dense' });
+      };
+
+      const SORT_MODES = ['name', 'type', 'size'];
+      const cycleSort = () => {
+        const index = SORT_MODES.indexOf(settings.sort);
+        saveSettings({ sort: SORT_MODES[(index + 1) % SORT_MODES.length] });
+      };
+
+      const toggleMarkedOnly = () => {
+        saveSettings({ markedOnly: settings.markedOnly !== true });
+      };
+
+      const togglePinsCollapsed = () => {
+        saveSettings({ pinsCollapsed: settings.pinsCollapsed !== true });
+      };
+
+      const toggleRecentCollapsed = () => {
+        saveSettings({ recentCollapsed: settings.recentCollapsed !== true });
+      };
+
+      // ── 选中：单击选中，Ctrl / Cmd 加选，双击插入 ──────────────────
+      const selectRow = (path, kind, event) => {
+        const multi = Boolean(event !== undefined && (event.ctrlKey || event.metaKey));
+        setSelected((prev) => {
+          const hit = prev.some((item) => item.path === path);
+          if (multi) {
+            return hit ? prev.filter((item) => item.path !== path) : prev.concat([{ path: path, kind: kind }]);
+          }
+          if (prev.length === 1 && hit) return [];
+          return [{ path: path, kind: kind }];
+        });
+      };
+
+      const isSelected = (path) => selected.some((item) => item.path === path);
+
+      /** 把选中的几项一次性插进输入框。 */
+      const insertSelected = () => {
+        const actions = inputRef.current;
+        if (actions === undefined || actions === null) {
+          setStatus({ message: tr('insertFailed'), error: true });
+          return;
+        }
+        const base = rootRef.current;
+        const mentions = [];
+        for (const item of selected) {
+          const mention = item.kind === 'directory'
+            ? formatFolderMention(base, item.path)
+            : formatMention(base, item.path);
+          if (mention !== undefined) mentions.push(mention.replace(/\s+$/u, ''));
+        }
+        if (mentions.length === 0) {
+          setStatus({ message: tr('insertFailed'), error: true });
+          return;
+        }
+        const joined = mentions.join(' ') + ' ';
+        try {
+          const span = typeof actions.captureInsertion === 'function' ? actions.captureInsertion() : undefined;
+          if (span !== undefined && span !== null && typeof actions.insertText === 'function') {
+            if (actions.insertText(' ' + joined, span) !== false) {
+              setStatus({ message: tr('selected.inserted', { n: mentions.length }), error: false });
+              setSelected([]);
+              return;
+            }
+          }
+          if (typeof actions.setDraft === 'function') {
+            const current = typeof draft === 'string' ? draft : '';
+            const separator = current !== '' && !/\s$/u.test(current) ? ' ' : '';
+            actions.setDraft(current + separator + joined);
+            setStatus({ message: tr('selected.inserted', { n: mentions.length }), error: false });
+            setSelected([]);
+            return;
+          }
+        } catch (error) {
+          /* 落到下面的失败提示 */
+        }
+        setStatus({ message: tr('insertFailed'), error: true });
+      };
+
+      // ── 最近使用：插入、预览、跳转都记一笔 ────────────────────────
+      const remember = (path, kind) => {
+        const base = rootRef.current;
+        if (base === undefined) return;
+        const relative = relativeTo(base, path);
+        if (relative === '') return;
+        const current = Array.isArray(recent) ? recent : [];
+        const next = [{ path: relative, kind: kind }]
+          .concat(current.filter((item) => item.path !== relative))
+          .slice(0, 12);
+        setRecent(next);
+        writeRecent(sessionSlot, next);
+      };
+
+      // ── 右键菜单 ─────────────────────────────────────────────────
+      const openMenu = (event, path, kind) => {
+        if (event !== undefined && typeof event.preventDefault === 'function') event.preventDefault();
+        if (event !== undefined && typeof event.stopPropagation === 'function') event.stopPropagation();
+        let x = event !== undefined && typeof event.clientX === 'number' ? event.clientX : 0;
+        let y = event !== undefined && typeof event.clientY === 'number' ? event.clientY : 0;
+        // 别让菜单跑出窗口右边和下边。
+        try {
+          const width = typeof window !== 'undefined' && typeof window.innerWidth === 'number' ? window.innerWidth : 0;
+          const height = typeof window !== 'undefined' && typeof window.innerHeight === 'number' ? window.innerHeight : 0;
+          if (width > 0) x = Math.max(4, Math.min(x, width - 220));
+          if (height > 0) y = Math.max(4, Math.min(y, height - 300));
+        } catch (error) {
+          /* 忽略 */
+        }
+        setMenu({ x: x, y: y, path: path, kind: kind });
+      };
+
+      useEffect(() => {
+        if (menu === null) return undefined;
+        const close = () => setMenu(null);
+        const onKeyDown = (event) => {
+          if (event.key === 'Escape') setMenu(null);
+        };
+        window.addEventListener('click', close);
+        window.addEventListener('keydown', onKeyDown, true);
+        return () => {
+          window.removeEventListener('click', close);
+          window.removeEventListener('keydown', onKeyDown, true);
+        };
+      }, [menu]);
+
+      // ── 复制 / 打开文件管理器 / 面板内预览 ────────────────────────
+      const copyValue = async (text, label) => {
+        const ok = await copyText(text);
+        setStatus({ message: ok ? tr('copied', { what: label }) : tr('copyFailed'), error: !ok });
+      };
+
+      const copyRelative = (path, kind) => {
+        const base = rootRef.current;
+        const relative = relativeTo(base, path) + (kind === 'directory' ? '/' : '');
+        copyValue(relative, tr('menu.copyRel'));
+      };
+
+      const copyAbsolute = (path) => {
+        copyValue(posixOf(path), tr('menu.copyAbs'));
+      };
+
+      const copyMarkdown = (path, kind) => {
+        const base = rootRef.current;
+        const relative = relativeTo(base, path) + (kind === 'directory' ? '/' : '');
+        const label = posixOf(path).replace(/\/+$/, '').split('/').pop() + (kind === 'directory' ? '/' : '');
+        copyValue(markdownLinkFor(label, relative), tr('menu.copyMd'));
+      };
+
+      const revealPath = async (path) => {
+        if (typeof openPath !== 'function') {
+          setStatus({ message: tr('revealFailed'), error: true });
+          return;
+        }
+        try {
+          const controller = new AbortController();
+          const result = await openPath({ path: posixOf(path), action: 'reveal' }, controller.signal);
+          if (unpackRemote(result) !== undefined) {
+            setStatus({ message: tr('revealed'), error: false });
+            return;
+          }
+          setStatus({ message: tr('revealFailed'), error: true });
+        } catch (error) {
+          setStatus({ message: tr('revealFailed'), error: true });
+        }
+      };
+
+      const closePreview = () => {
+        if (previewRef.current !== null) {
+          previewRef.current.abort();
+          previewRef.current = null;
+        }
+        setPreview(null);
+      };
+
+      /** 读一段文本在面板里预览；读不了的（图片等）直接交给产品预览页签。 */
+      const openInline = async (path) => {
+        if (root === undefined) return;
+        const kind = fileKindOf(path);
+        if (typeof readFile !== 'function' || kind.id === 'image' || kind.id === 'archive') {
+          viewFile(path);
+          return;
+        }
+        if (previewRef.current !== null) previewRef.current.abort();
+        const controller = new AbortController();
+        previewRef.current = controller;
+        setPreview({ kind: 'loading', path: path, text: '', lines: 0, eof: true });
+        try {
+          const result = await readFile(sessionId, path, { offset: 1, limit: PREVIEW_LIMITS.lines }, controller.signal);
+          if (previewRef.current !== controller) return;
+          const value = unpackRemote(result);
+          if (value === undefined || typeof value.text !== 'string') {
+            setPreview({ kind: 'failed', path: path, text: '', lines: 0, eof: true });
+            return;
+          }
+          setPreview({
+            kind: 'ready',
+            path: path,
+            text: value.text,
+            lines: typeof value.lines === 'number' ? value.lines : 0,
+            eof: value.eof === true,
+          });
+          remember(path, 'file');
+        } catch (error) {
+          if (previewRef.current !== controller) return;
+          setPreview({ kind: 'failed', path: path, text: '', lines: 0, eof: true });
+        } finally {
+          if (previewRef.current === controller) previewRef.current = null;
+        }
+      };
+
+      // ── 全项目递归搜索：勾上放大镜后，输入框变成搜索框 ─────────────
+      const stopSearch = () => {
+        const controller = searchRef.current;
+        if (controller !== null) {
+          controller.abort();
+          searchRef.current = null;
+        }
+        searchIdRef.current += 1;
+        setSearch(null);
+      };
+
+      useEffect(() => {
+        if (searchMode !== true || root === undefined) {
+          if (search !== null) setSearch(null);
+          return undefined;
+        }
+        const needle = (filter === undefined || filter === null ? '' : String(filter)).trim();
+        if (needle === '') {
+          if (search !== null) setSearch(null);
+          return undefined;
+        }
+        let cancelled = false;
+        const timer = setTimeout(() => {
+          const controller = new AbortController();
+          searchRef.current = controller;
+          searchIdRef.current += 1;
+          const id = searchIdRef.current;
+          setSearch({ kind: 'searching', results: [], scanned: 0, truncated: false, needle: needle });
+          searchProject(listApi.current, sessionId, rootRef.current, needle, controller.signal, (progress) => {
+            if (cancelled || searchIdRef.current !== id) return;
+            setSearch((prev) => (prev === null
+              ? prev
+              : {
+                kind: 'searching',
+                results: prev.results,
+                scanned: progress.scanned,
+                truncated: prev.truncated,
+                needle: needle,
+              }));
+          }).then((outcome) => {
+            if (cancelled || searchIdRef.current !== id) return;
+            setSearch({
+              kind: 'ready',
+              results: outcome.results,
+              scanned: outcome.scanned,
+              truncated: outcome.truncated,
+              needle: needle,
+            });
+            if (searchRef.current === controller) searchRef.current = null;
+          }).catch(() => {
+            if (cancelled || searchIdRef.current !== id) return;
+            setSearch({ kind: 'ready', results: [], scanned: 0, truncated: false, needle: needle });
+          });
+        }, 280);
+        return () => {
+          cancelled = true;
+          clearTimeout(timer);
+        };
+      }, [searchMode, filter, root, sessionId]);
+
+      // ── 浏览位置：展开状态和滚动位置按对话记住 ────────────────────
+      useEffect(() => {
+        if (root === undefined) return;
+        writeViewState(pinsSlot, { expanded: expanded, scrollTop: lastScrollRef.current });
+      }, [expanded, root, pinsSlot]);
+
+      // ── 收藏拖拽排序 ─────────────────────────────────────────────
+      const movePins = (from, to) => {
+        const current = Array.isArray(pins) ? pins.slice() : [];
+        if (from < 0 || from >= current.length || to < 0 || to > current.length) return;
+        if (from === to) return;
+        const moved = current.splice(from, 1)[0];
+        current.splice(Math.max(0, Math.min(current.length, to)), 0, moved);
+        savePins(current);
+        setStatus({ message: tr('pins.moved'), error: false });
+      };
+
+      // 收藏改「所有对话共用」/「只本对话」时，把当前这份搬过去，别让列表凭空消失。
+      const toggleSharedPins = () => {
+        const next = settings.sharedPins !== true;
+        const current = Array.isArray(pins) ? pins : [];
+        const target = next ? SHARED_PINS_SLOT : sessionSlot;
+        writePinsToSlot(target, current);
+        saveSettings({ sharedPins: next });
+        setStatus({ message: tr(next ? 'pins.sharedOn' : 'pins.sharedOff'), error: false });
+      };
+
+      const exportPins = () => {
+        const ok = downloadJson('project-file-picker-favourites.json', {
+          version: 1,
+          pins: Array.isArray(pins) ? pins : [],
+        });
+        setStatus({ message: ok ? tr('pins.exported') : tr('copyFailed'), error: !ok });
+      };
+
+      const importPins = (event) => {
+        const target = event !== undefined && event.target !== undefined ? event.target : undefined;
+        const file = target !== undefined && target.files !== undefined ? target.files[0] : undefined;
+        if (file === undefined || file === null || typeof FileReader === 'undefined') return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const parsed = JSON.parse(String(reader.result));
+            const items = Array.isArray(parsed) ? parsed : Array.isArray(parsed.pins) ? parsed.pins : [];
+            const current = Array.isArray(pins) ? pins.slice() : [];
+            let added = 0;
+            for (const item of items) {
+              const pin = normalizePin(item);
+              if (pin === undefined) continue;
+              if (current.some((existing) => samePin(existing, pin))) continue;
+              current.push(pin);
+              added += 1;
+            }
+            savePins(current);
+            setStatus({ message: tr('pins.imported', { n: added }), error: false });
+          } catch (error) {
+            setStatus({ message: tr('pins.importFailed'), error: true });
+          }
+          if (target !== undefined) target.value = '';
+        };
+        reader.onerror = () => {
+          setStatus({ message: tr('pins.importFailed'), error: true });
+          if (target !== undefined) target.value = '';
+        };
+        reader.readAsText(file);
       };
 
       const onDragStart = (event, path, kind) => {
@@ -1336,17 +2346,45 @@ window.__ModuleLoader__.load({
           if (level === undefined || level.kind !== 'ready') continue;
           for (const entry of level.entries) {
             if (entry.type !== 'file') continue;
-            found.push({ path: joinPath(path, entry.name), name: entry.name });
+            found.push({ path: joinPath(path, entry.name), name: entry.name, size: entry.size });
           }
         }
         return found.sort((left, right) => collator.compare(left.path, right.path));
       }, [levels]);
 
       const matches = useMemo(() => {
-        const needle = filter.trim().toLowerCase();
+        const needle = (filter === undefined || filter === null ? '' : String(filter)).trim().toLowerCase();
         if (needle === '') return null;
         return loadedFiles.filter((file) => file.path.toLowerCase().indexOf(needle) >= 0).slice(0, 300);
       }, [filter, loadedFiles]);
+
+      // 出错时在顶部出一条可关掉的提示条；换一条新提示就重新出现。
+      useEffect(() => {
+        setErrorHidden(false);
+      }, [status]);
+
+      // 滚动位置：滚动时记住，下次回来恢复。
+      const onBodyScroll = () => {
+        const node = bodyRef.current;
+        if (node === null) return;
+        lastScrollRef.current = node.scrollTop;
+        if (scrollTimerRef.current !== 0) return;
+        scrollTimerRef.current = setTimeout(() => {
+          scrollTimerRef.current = 0;
+          if (rootRef.current === undefined) return;
+          writeViewState(pinsSlot, { expanded: expandedRef.current, scrollTop: lastScrollRef.current });
+        }, 400);
+      };
+
+      useEffect(() => {
+        if (root === undefined || restoredScrollRef.current === true) return;
+        const node = bodyRef.current;
+        if (node === null) return;
+        if (levels[root] === undefined) return;
+        const saved = readViewState(sessionSlot, root);
+        if (saved !== undefined && saved.scrollTop > 0) node.scrollTop = saved.scrollTop;
+        restoredScrollRef.current = true;
+      }, [root, levels, sessionSlot]);
 
       if (root === undefined) {
         return h('div', { className: 'pfp-root' }, [
@@ -1357,8 +2395,23 @@ window.__ModuleLoader__.load({
         ]);
       }
 
+      const dense = settings.density === 'dense';
+      const pinsCollapsed = settings.pinsCollapsed === true;
+      const recentCollapsed = settings.recentCollapsed !== false;
+      const shared = settings.sharedPins === true;
+      const sortShort = tr('sort.' + settings.sort + '.short');
+
       const header = h('div', { key: 'header', className: 'pfp-header' }, [
         h('span', { key: 'path', className: 'pfp-path', title: root }, root),
+        h('button', {
+          key: 'density',
+          type: 'button',
+          className: 'pfp-tool',
+          title: dense ? tr('density.cozy') : tr('density.compact'),
+          'aria-label': dense ? tr('density.cozy') : tr('density.compact'),
+          'data-pfp-density': settings.density,
+          onClick: toggleDensity,
+        }, h(DensityGlyph)),
         h('button', {
           key: 'reload',
           type: 'button',
@@ -1369,18 +2422,104 @@ window.__ModuleLoader__.load({
         }, h(ReloadGlyph)),
       ]);
 
-      const filterRow = h('div', { key: 'filter', className: 'pfp-filterRow' }, h('input', {
-        type: 'text',
-        className: 'pfp-filter',
-        placeholder: tr('filter'),
-        value: filter,
-        spellCheck: false,
-        'aria-label': tr('filter'),
-        onChange: (event) => setFilter(event.target.value),
+      const toolbar = h('div', { key: 'filter', className: 'pfp-filterRow' }, [
+        h('input', {
+          key: 'input',
+          type: 'text',
+          className: 'pfp-filter',
+          placeholder: searchMode ? tr('search.hint') : tr('filter'),
+          value: filter,
+          spellCheck: false,
+          'aria-label': searchMode ? tr('search.whole') : tr('filter'),
+          onChange: (event) => setFilter(event.target.value),
+        }),
+        h('button', {
+          key: 'search',
+          type: 'button',
+          className: searchMode ? 'pfp-iconBtn pfp-iconBtn-on' : 'pfp-iconBtn',
+          title: tr('search.whole'),
+          'aria-label': tr('search.whole'),
+          'aria-pressed': searchMode,
+          'data-pfp-search': '1',
+          onClick: () => {
+            if (searchMode) {
+              setSearchMode(false);
+              stopSearch();
+              return;
+            }
+            setSearchMode(true);
+          },
+        }, h(SearchGlyph)),
+        h('button', {
+          key: 'sort',
+          type: 'button',
+          className: 'pfp-iconBtn',
+          title: tr('sort.state', { mode: sortShort }),
+          'aria-label': tr('sort.state', { mode: sortShort }),
+          'data-pfp-sort': settings.sort,
+          onClick: cycleSort,
+        }, h(SortGlyph)),
+        h('button', {
+          key: 'marked',
+          type: 'button',
+          className: settings.markedOnly === true ? 'pfp-iconBtn pfp-iconBtn-on' : 'pfp-iconBtn',
+          title: settings.markedOnly === true ? tr('marked.all') : tr('marked.only'),
+          'aria-label': settings.markedOnly === true ? tr('marked.all') : tr('marked.only'),
+          'aria-pressed': settings.markedOnly === true,
+          'data-pfp-marked': settings.markedOnly === true ? '1' : '0',
+          onClick: toggleMarkedOnly,
+        }, h(MarkedGlyph)),
+      ]);
+
+      const errorBar = status !== null && status.error === true && !dragging && errorHidden !== true
+        ? h('div', { key: 'error', className: 'pfp-errorBar', 'data-pfp-error': '1' }, [
+          h('span', { key: 'text', className: 'pfp-errorBarText' }, status.message),
+          h('button', {
+            key: 'close',
+            type: 'button',
+            className: 'pfp-errorBarClose',
+            'aria-label': tr('preview.close'),
+            onClick: () => setErrorHidden(true),
+          }, '×'),
+        ])
+        : null;
+
+      /** 一个文件结果行（筛选结果和搜索结果共用）。 */
+      const fileRow = (file) => h('li', { key: file.path, className: 'pfp-item' }, h(FileRow, {
+        path: file.path,
+        label: relativeTo(root, file.path),
+        title: file.path,
+        tr: tr,
+        pinned: isPinned(file.path),
+        selected: isSelected(file.path),
+        size: file.size,
+        onSelect: selectRow,
+        onInsert: insertPath,
+        onView: viewFile,
+        onPin: togglePin,
+        onContextMenu: openMenu,
+        onDragStart: onDragStart,
+        onDragEnd: onDragEnd,
       }));
 
       let body;
-      if (matches !== null) {
+      if (searchMode) {
+        if (search === null) {
+          body = h('p', { className: 'pfp-note' }, tr('search.hint'));
+        } else if (search.results.length === 0) {
+          body = h('p', { className: 'pfp-note' }, search.kind === 'searching'
+            ? tr('search.searching', { dirs: search.scanned })
+            : tr('search.none'));
+        } else {
+          body = h(React.Fragment, null, [
+            h('p', { key: 'sum', className: 'pfp-note' }, search.kind === 'searching'
+              ? tr('search.searching', { dirs: search.scanned })
+              : tr('search.done', { n: search.results.length, dirs: search.scanned })
+                + (search.truncated === true ? ' · ' + tr('search.limit') : '')),
+            h('ul', { key: 'list', className: 'pfp-level' }, search.results.map(fileRow)),
+          ]);
+        }
+      } else if (matches !== null) {
         const rootLevel = levels[root];
         if (rootLevel === undefined || rootLevel.kind === 'loading') {
           body = h('p', { className: 'pfp-note' }, tr('loading'));
@@ -1389,21 +2528,7 @@ window.__ModuleLoader__.load({
         } else if (matches.length === 0) {
           body = h('p', { className: 'pfp-note' }, tr('noMatch'));
         } else {
-          body = h('ul', { className: 'pfp-level' }, matches.map((file) => h('li', {
-            key: file.path,
-            className: 'pfp-item',
-          }, h(FileRow, {
-            path: file.path,
-            label: relativeTo(root, file.path),
-            title: file.path,
-            tr: tr,
-            pinned: isPinned(file.path),
-            onInsert: insertPath,
-            onView: viewFile,
-            onPin: togglePin,
-            onDragStart: onDragStart,
-            onDragEnd: onDragEnd,
-          }))));
+          body = h('ul', { className: 'pfp-level' }, matches.map(fileRow));
         }
       } else {
         body = h(TreeLevel, {
@@ -1425,73 +2550,360 @@ window.__ModuleLoader__.load({
           isPinned: isPinned,
           onPin: togglePin,
           highlight: highlightOf,
+          isSelected: isSelected,
+          onSelect: selectRow,
+          onContextMenu: openMenu,
+          sortMode: settings.sort,
+          markedOnly: settings.markedOnly === true,
         });
       }
 
-      // 固定区：当前对话自己的那一套。刷新页面、切回来都还在，
-      // 但换个对话看到的是另一套，互不相关。
+      // 快速访问：当前对话自己的一套（或所有对话共用的那一套）。
       const pinsSection = h('div', { key: 'pins', className: 'pfp-pins', 'data-pfp-pins': '1' }, [
         h('div', { key: 'head', className: 'pfp-pinsHead' }, [
-          h(PinGlyph, { key: 'glyph' }),
+          h('button', {
+            key: 'toggle',
+            type: 'button',
+            className: 'pfp-iconBtn',
+            title: pinsCollapsed ? tr('pins.expand') : tr('pins.collapse'),
+            'aria-expanded': pinsCollapsed !== true,
+            'data-pfp-pins-toggle': '1',
+            onClick: togglePinsCollapsed,
+          }, h(CaretGlyph, { open: pinsCollapsed !== true })),
           h('span', { key: 'label', title: tr('pin.localOnly') }, tr('pin.section')),
-          h('span', { key: 'count', title: tr('pin.localOnly') }, '· ' + pinsShown.length),
+          h('span', { key: 'count', title: shared ? tr('pins.scopeGlobal') : tr('pin.localOnly') }, '· ' + pinsShown.length),
+          h('button', {
+            key: 'scope',
+            type: 'button',
+            className: 'pfp-pinScope',
+            title: shared ? tr('pins.scopeGlobal') : tr('pins.scopeLocal'),
+            'data-pfp-pins-scope': shared ? 'global' : 'local',
+            onClick: toggleSharedPins,
+          }, shared ? tr('pins.scopeShortGlobal') : tr('pins.scopeShortLocal')),
+          h('div', { key: 'actions', className: 'pfp-pinsActions' }, [
+            h('button', {
+              key: 'export',
+              type: 'button',
+              className: 'pfp-iconBtn',
+              title: tr('pins.export'),
+              'aria-label': tr('pins.export'),
+              'data-pfp-pins-export': '1',
+              onClick: exportPins,
+            }, h(DownloadGlyph)),
+            h('button', {
+              key: 'import',
+              type: 'button',
+              className: 'pfp-iconBtn',
+              title: tr('pins.import'),
+              'aria-label': tr('pins.import'),
+              'data-pfp-pins-import': '1',
+              onClick: () => {
+                const node = importRef.current;
+                if (node !== null && node !== undefined) node.click();
+              },
+            }, h(UploadGlyph)),
+            h('input', {
+              key: 'file',
+              ref: importRef,
+              type: 'file',
+              accept: 'application/json,.json',
+              style: { display: 'none' },
+              'data-pfp-pins-file': '1',
+              onChange: importPins,
+            }),
+          ]),
         ]),
-        pinsShown.length === 0
-          ? h('p', { key: 'empty', className: 'pfp-note', style: { padding: '2px 0' } }, tr('pin.empty'))
-          : h('ul', { key: 'list', className: 'pfp-pinList' }, pinsShown.map((pin) => {
-            const name = pin.path.split('/').pop();
-            const identity = pinKey(pin);
-            return h('li', { key: identity, className: 'pfp-pinItem' }, [
-              h('button', {
-                key: 'main',
-                type: 'button',
-                className: 'pfp-pinMain',
-                title: pin.kind === 'directory' ? tr('pin.jumpHint') : pin.path,
-                'data-pfp-pin-open': identity,
-                onClick: () => openPin(pin),
-              }, [
-                pin.kind === 'directory'
-                  ? h(FolderGlyph, { key: 'icon', color: (tagOf(joinPath(root, pin.path)) || {}).color })
-                  : h(FileGlyph, { key: 'icon' }),
-                h('span', { key: 'name', className: 'pfp-pinName' }, name),
-                h('span', { key: 'path', className: 'pfp-pinPath' }, pin.path),
-              ]),
-              h('button', {
-                key: 'remove',
-                type: 'button',
-                className: 'pfp-pinRemove',
-                title: tr('pin.unpin'),
-                'aria-label': tr('pin.unpin'),
-                'data-pfp-pin-remove': identity,
-                onClick: (event) => {
-                  event.stopPropagation();
-                  removePin(pin);
+        pinsCollapsed
+          ? null
+          : pinsShown.length === 0
+            ? h('p', { key: 'empty', className: 'pfp-note', style: { padding: '2px 0' } }, tr('pin.empty'))
+            : h('ul', { key: 'list', className: 'pfp-pinList' }, pinsShown.map((pin, index) => {
+              const name = pin.path.split('/').pop();
+              const identity = pinKey(pin);
+              const itemClass = 'pfp-pinItem'
+                + (pinDrag !== null && pinDrag.from === index ? ' pfp-pinItem-dragging' : '')
+                + (pinDrag !== null && pinDrag.over === index && pinDrag.from !== index ? ' pfp-pinItem-drop' : '');
+              return h('li', {
+                key: identity,
+                className: itemClass,
+                draggable: true,
+                'data-pfp-pin-index': String(index),
+                onDragStart: (event) => {
+                  if (event !== undefined && event.dataTransfer !== undefined) {
+                    try {
+                      event.dataTransfer.effectAllowed = 'move';
+                      event.dataTransfer.setData('text/plain', pin.path);
+                    } catch (error) {
+                      /* 忽略 */
+                    }
+                  }
+                  setPinDrag({ from: index, over: index });
                 },
-              }, '×'),
-            ]);
-          })),
+                onDragOver: (event) => {
+                  if (event !== undefined && typeof event.preventDefault === 'function') event.preventDefault();
+                  if (pinDrag !== null && pinDrag.over !== index) setPinDrag({ from: pinDrag.from, over: index });
+                },
+                onDragEnd: () => setPinDrag(null),
+                onDrop: (event) => {
+                  if (event !== undefined && typeof event.preventDefault === 'function') event.preventDefault();
+                  if (pinDrag !== null) movePins(pinDrag.from, index);
+                  setPinDrag(null);
+                },
+              }, [
+                h('span', { key: 'grip', className: 'pfp-pinGrip' }, h(GripGlyph)),
+                h('button', {
+                  key: 'main',
+                  type: 'button',
+                  className: 'pfp-pinMain',
+                  title: pin.kind === 'directory' ? tr('pin.jumpHint') : pin.path,
+                  'data-pfp-pin-open': identity,
+                  onClick: () => openPin(pin),
+                }, [
+                  pin.kind === 'directory'
+                    ? h(FolderGlyph, { key: 'icon', color: (tagOf(joinPath(root, pin.path)) || {}).color })
+                    : h(FileGlyph, { key: 'icon', color: fileKindOf(pin.path).color }),
+                  h('span', { key: 'name', className: 'pfp-pinName' }, name),
+                  h('span', { key: 'path', className: 'pfp-pinPath' }, pin.path),
+                ]),
+                h('button', {
+                  key: 'remove',
+                  type: 'button',
+                  className: 'pfp-pinRemove',
+                  title: tr('pin.unpin'),
+                  'aria-label': tr('pin.unpin'),
+                  'data-pfp-pin-remove': identity,
+                  onClick: (event) => {
+                    event.stopPropagation();
+                    removePin(pin);
+                  },
+                }, '×'),
+              ]);
+            })),
+      ]);
+
+      // 最近使用：默认收起，点开就是最近用过的目录 / 文件。
+      const recentSection = recent.length === 0 ? null : h('div', {
+        key: 'recent',
+        className: 'pfp-section',
+        'data-pfp-recent': '1',
+      }, [
+        h('div', { key: 'head', className: 'pfp-sectionHead' }, [
+          h('button', {
+            key: 'toggle',
+            type: 'button',
+            className: 'pfp-iconBtn',
+            title: recentCollapsed ? tr('pins.expand') : tr('pins.collapse'),
+            'aria-expanded': recentCollapsed !== true,
+            'data-pfp-recent-toggle': '1',
+            onClick: toggleRecentCollapsed,
+          }, h(CaretGlyph, { open: recentCollapsed !== true })),
+          h('span', { key: 'label' }, tr('recent.section')),
+          h('span', { key: 'count' }, '· ' + recent.length),
+        ]),
+        recentCollapsed
+          ? null
+          : h('ul', { key: 'list', className: 'pfp-pinList' }, recent.map((item) => h('li', {
+            key: item.path,
+            className: 'pfp-pinItem',
+          }, h('button', {
+            key: 'main',
+            type: 'button',
+            className: 'pfp-pinMain',
+            title: item.path,
+            'data-pfp-recent-open': item.path,
+            onClick: () => {
+              const absolute = joinPath(root, item.path);
+              if (item.kind === 'directory') openPin(item);
+              else insertPath(absolute);
+            },
+          }, [
+            item.kind === 'directory'
+              ? h(FolderGlyph, { key: 'icon', color: (tagOf(joinPath(root, item.path)) || {}).color })
+              : h(FileGlyph, { key: 'icon', color: fileKindOf(item.path).color }),
+            h('span', { key: 'name', className: 'pfp-pinName' }, item.path.split('/').pop()),
+            h('span', { key: 'path', className: 'pfp-pinPath' }, item.path),
+          ])))),
+      ]);
+
+      // 面板内预览：读一段文本，不离开右栏。
+      const previewPane = preview === null ? null : h('div', {
+        key: 'preview',
+        className: 'pfp-preview',
+        'data-pfp-preview': '1',
+      }, [
+        h('div', { key: 'head', className: 'pfp-previewHead' }, [
+          h('span', { key: 'name', className: 'pfp-previewName', title: preview.path },
+            relativeTo(root, preview.path)),
+          preview.kind === 'ready'
+            ? h('span', { key: 'lines', className: 'pfp-pinScope' }, tr('preview.lines', { n: preview.lines }))
+            : null,
+          h('button', {
+            key: 'tab',
+            type: 'button',
+            className: 'pfp-iconBtn',
+            title: tr('preview.openTab'),
+            'aria-label': tr('preview.openTab'),
+            onClick: () => viewFile(preview.path),
+          }, h(EyeGlyph)),
+          h('button', {
+            key: 'close',
+            type: 'button',
+            className: 'pfp-iconBtn',
+            title: tr('preview.close'),
+            'aria-label': tr('preview.close'),
+            'data-pfp-preview-close': '1',
+            onClick: closePreview,
+          }, '×'),
+        ]),
+        preview.kind === 'loading'
+          ? h('p', { key: 'loading', className: 'pfp-previewNote' }, tr('preview.loading'))
+          : preview.kind === 'failed'
+            ? h('p', { key: 'failed', className: 'pfp-previewNote' }, tr('preview.failed'))
+            : h(React.Fragment, null, [
+              h('pre', { key: 'text', className: 'pfp-previewBody' }, preview.text),
+              preview.eof === true
+                ? null
+                : h('p', { key: 'trunc', className: 'pfp-previewNote' }, tr('preview.truncated', { n: preview.lines })),
+            ]),
+      ]);
+
+      const selectionBar = selected.length === 0 ? null : h('div', {
+        key: 'sel',
+        className: 'pfp-selbar',
+        'data-pfp-selection': String(selected.length),
+      }, [
+        h('span', { key: 'text', className: 'pfp-selbarText' }, tr('selected.n', { n: selected.length })),
+        h('button', {
+          key: 'insert',
+          type: 'button',
+          className: 'pfp-menuBtn pfp-menuBtn-primary',
+          'data-pfp-insert-selected': '1',
+          onClick: insertSelected,
+        }, tr('selected.insert')),
+        h('button', {
+          key: 'clear',
+          type: 'button',
+          className: 'pfp-menuBtn',
+          'data-pfp-clear-selected': '1',
+          onClick: () => setSelected([]),
+        }, tr('selected.clear')),
+      ]);
+
+      const menuNode = menu === null ? null : h('div', {
+        key: 'menu',
+        className: 'pfp-menu',
+        'data-pfp-menu': '1',
+        style: { left: String(menu.x) + 'px', top: String(menu.y) + 'px' },
+      }, [
+        h('div', { key: 'path', className: 'pfp-menuItem-path', title: menu.path }, relativeTo(root, menu.path)),
+        h('div', { key: 'sep1', className: 'pfp-menuSep' }),
+        h('button', {
+          key: 'insert',
+          type: 'button',
+          className: 'pfp-menuItem',
+          'data-pfp-menu-item': 'insert',
+          onClick: () => { setMenu(null); if (menu.kind === 'directory') insertFolder(menu.path); else insertPath(menu.path); },
+        }, menu.kind === 'directory' ? tr('menu.insertDir') : tr('menu.insert')),
+        h('button', {
+          key: 'view',
+          type: 'button',
+          className: 'pfp-menuItem',
+          'data-pfp-menu-item': 'view',
+          onClick: () => { setMenu(null); viewFile(menu.path); },
+        }, tr('menu.view')),
+        typeof readFile === 'function' && fileKindOf(menu.path).id !== 'image'
+          ? h('button', {
+            key: 'inline',
+            type: 'button',
+            className: 'pfp-menuItem',
+            'data-pfp-menu-item': 'inline',
+            onClick: () => { setMenu(null); openInline(menu.path); },
+          }, tr('menu.inline'))
+          : null,
+        h('div', { key: 'sep2', className: 'pfp-menuSep' }),
+        h('button', {
+          key: 'pin',
+          type: 'button',
+          className: 'pfp-menuItem',
+          'data-pfp-menu-item': 'pin',
+          onClick: () => { setMenu(null); togglePin(menu.path, menu.kind); },
+        }, isPinned(menu.path) ? tr('menu.unpin') : tr('menu.pin')),
+        h('button', {
+          key: 'rel',
+          type: 'button',
+          className: 'pfp-menuItem',
+          'data-pfp-menu-item': 'copyRel',
+          onClick: () => { setMenu(null); copyRelative(menu.path, menu.kind); },
+        }, tr('menu.copyRel')),
+        h('button', {
+          key: 'abs',
+          type: 'button',
+          className: 'pfp-menuItem',
+          'data-pfp-menu-item': 'copyAbs',
+          onClick: () => { setMenu(null); copyAbsolute(menu.path); },
+        }, tr('menu.copyAbs')),
+        h('button', {
+          key: 'md',
+          type: 'button',
+          className: 'pfp-menuItem',
+          'data-pfp-menu-item': 'copyMd',
+          onClick: () => { setMenu(null); copyMarkdown(menu.path, menu.kind); },
+        }, tr('menu.copyMd')),
+        typeof openPath === 'function'
+          ? h('button', {
+            key: 'reveal',
+            type: 'button',
+            className: 'pfp-menuItem',
+            'data-pfp-menu-item': 'reveal',
+            onClick: () => { setMenu(null); revealPath(menu.path); },
+          }, tr('menu.reveal'))
+          : null,
+        menu.kind === 'directory'
+          ? h('button', {
+            key: 'tag',
+            type: 'button',
+            className: 'pfp-menuItem',
+            'data-pfp-menu-item': 'tag',
+            onClick: () => { setMenu(null); toggleTagEditor(menu.path); },
+          }, tr('menu.tag'))
+          : null,
       ]);
 
       const message = dragging
         ? tr('hint.dragging')
         : status === null
           ? tr('hint.drag')
-          : status.message;
-      const failed = status !== null && status.error === true && !dragging;
+          : status.error === true
+            ? ''
+            : status.message;
 
-      return h('div', { className: 'pfp-root', 'data-project-files-root': root }, [
+      return h('div', {
+        className: dense ? 'pfp-root pfp-dense' : 'pfp-root',
+        'data-project-files-root': root,
+      }, [
         header,
-        filterRow,
+        toolbar,
+        errorBar,
         pinsSection,
-        h('div', { key: 'body', className: 'pfp-body' }, body),
+        recentSection,
+        h('div', {
+          key: 'body',
+          className: 'pfp-body',
+          ref: bodyRef,
+          onScroll: onBodyScroll,
+          onClick: (event) => {
+            // 点空白处取消选中（行上自己会停掉冒泡）。
+            if (event !== undefined && event.target === event.currentTarget && selected.length > 0) setSelected([]);
+          },
+        }, body),
+        previewPane,
+        selectionBar,
         h('div', { key: 'foot', className: 'pfp-foot' }, [
-          h('span', {
-            key: 'hint',
-            className: failed ? 'pfp-footMsg pfp-footMsg-error' : 'pfp-footMsg',
-          }, message),
+          h('span', { key: 'hint', className: 'pfp-footMsg' }, message),
           h('span', { key: 'count', className: 'pfp-footMsg', style: { flex: 'none', opacity: 0.75 } },
             tr('count', { n: loadedFiles.length })),
         ]),
+        menuNode,
       ]);
     }
 
@@ -1524,7 +2936,7 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'remote', 'remote.workspaceFiles'],
+      inject: ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'remote', 'remote.workspaceFiles', 'remote.session'],
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, { zh: zh, en: en }), 'project-file-picker: dictionaries');
         ctx.effect(() => {
@@ -1556,6 +2968,16 @@ window.__ModuleLoader__.load({
 
         const remote = ctx.remote;
         const listDirectory = (sessionId, path, signal) => remote.workspaceFiles.list(sessionId, path, signal);
+        // 面板内预览要读一段文件文本；这个能力在带 workspace files 的 profile 里才有。
+        const readFile = remote.workspaceFiles !== undefined && remote.workspaceFiles !== null
+          && typeof remote.workspaceFiles.read === 'function'
+          ? (sessionId, path, range, signal) => remote.workspaceFiles.read(sessionId, path, range, signal)
+          : undefined;
+        // 在系统文件管理器里定位；没有这个能力的 profile 就不显示菜单项。
+        const openPath = remote.session !== undefined && remote.session !== null
+          && typeof remote.session.openWorkspacePath === 'function'
+          ? (request, signal) => remote.session.openWorkspacePath(request, signal)
+          : undefined;
 
         ctx.effect(() => ctx.sidebarRightTabs.register(
           projectFilesDefinition((key, params) => translate(key, params)),
@@ -1565,7 +2987,13 @@ window.__ModuleLoader__.load({
           name: 'sidebar.right.pane.tab',
           key: TAB_ID,
           locale: NS,
-        }, (props) => h(ProjectFilesBody, Object.assign({}, props, { listDirectory: listDirectory })))), 'project-file-picker: tab body');
+        }, (props) => {
+          // 只有这个 profile 提供的能力才覆盖进去，缺的能力保持 undefined。
+          const extra = { listDirectory: listDirectory };
+          if (readFile !== undefined) extra.readFile = readFile;
+          if (openPath !== undefined) extra.openPath = openPath;
+          return h(ProjectFilesBody, Object.assign({}, props, extra));
+        })), 'project-file-picker: tab body');
 
         ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({
           name: 'sidebar.right.pane.tab.title',

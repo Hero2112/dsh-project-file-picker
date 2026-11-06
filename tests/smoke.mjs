@@ -1,6 +1,6 @@
 // project-file-picker 客户端模块的功能冒烟测试。
-// 用桩对象模拟 Harness 全局，检查右栏页签注册、引导卡、页签正文的目录树、
-// 插入引用、打开预览、文件夹标记、一次性自动展开，以及按对话隔离的固定项。
+// 用桩对象模拟 Harness 全局，检查右栏页签注册、引导卡、目录树、选中与双击插入、
+// 右键菜单、面板内预览、全项目搜索、标记与收藏（快速访问）、设置持久化和旧数据迁移。
 // 全程不渲染真实界面、也不碰 DOM。
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
@@ -12,10 +12,11 @@ const typeRegistrations = [];
 let dictionaries = null;
 const effects = [];
 const timers = [];
-const openTabCalls = [];
 let stateQueue = [];
 let stateWrites = [];
 let stateIndex = 0;
+/** 传这个值表示「这一格用组件自己的初始值」。 */
+const INITIAL = Symbol('initial');
 
 const reactStub = {
   createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }),
@@ -23,9 +24,10 @@ const reactStub = {
   useState: (initial) => {
     const index = stateIndex;
     stateIndex += 1;
-    const value = stateQueue.length > 0
-      ? stateQueue.shift()
-      : typeof initial === 'function' ? initial() : initial;
+    const queued = stateQueue.length > 0 ? stateQueue.shift() : INITIAL;
+    const value = queued === INITIAL
+      ? (typeof initial === 'function' ? initial() : initial)
+      : queued;
     return [value, (next) => {
       stateWrites.push({ index, value: next });
     }];
@@ -42,6 +44,7 @@ const windowStub = {
   localStorage: {
     getItem: (key) => (storage.has(key) ? storage.get(key) : null),
     setItem: (key, value) => storage.set(key, String(value)),
+    removeItem: (key) => storage.delete(key),
   },
   addEventListener: () => {},
   removeEventListener: () => {},
@@ -54,15 +57,36 @@ const windowStub = {
   },
 };
 
+/** 目录读取的桩：按路径返回预置的目录内容。 */
 const listCalls = [];
+const listFixture = new Map();
+const readFixtures = new Map();
+let readCalls = 0;
+const openedPaths = [];
 const remote = {
   workspaceFiles: {
     list: async (sessionId, path) => {
       listCalls.push({ sessionId, path });
-      return { ok: true, value: { entries: [], truncated: false } };
+      const found = listFixture.get(path);
+      return { ok: true, value: found === undefined ? { entries: [], truncated: false } : found };
+    },
+    read: async (sessionId, path, range) => {
+      readCalls += 1;
+      const found = readFixtures.get(path);
+      return found === undefined
+        ? { ok: false, error: { code: 'workspace-file/not-found' } }
+        : { ok: true, value: found };
+    },
+  },
+  session: {
+    openWorkspacePath: async (request) => {
+      openedPaths.push(request);
+      return { ok: true, value: { opened: true } };
     },
   },
 };
+
+const copies = [];
 
 function makeContext() {
   return {
@@ -86,7 +110,7 @@ function makeContext() {
     },
     sidebarRight: {
       openTab(kind, options) {
-        openTabCalls.push({ kind, options });
+        openTabCallsPush({ kind, options });
       },
     },
     slots: {
@@ -101,6 +125,8 @@ function makeContext() {
     },
   };
 }
+const openTabCalls = [];
+const openTabCallsPush = (call) => openTabCalls.push(call);
 
 const sandbox = {
   window: windowStub,
@@ -121,6 +147,13 @@ const sandbox = {
   Number,
   JSON,
   encodeURIComponent,
+  navigator: {
+    clipboard: {
+      writeText: async (text) => {
+        copies.push(text);
+      },
+    },
+  },
   setTimeout: (callback) => {
     timers.push(callback);
     return timers.length;
@@ -138,9 +171,10 @@ if (definition.id !== '@local/project-file-picker') throw new Error('unexpected 
 
 const plugin = definition.factory(sandbox.require);
 if (typeof plugin.apply !== 'function') throw new Error('factory returned no apply()');
-const required = ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'remote', 'remote.workspaceFiles'];
 if (!Array.isArray(plugin.inject)) throw new Error('factory returned no inject array');
-for (const service of required) if (plugin.inject.indexOf(service) < 0) throw new Error('inject is missing ' + service);
+for (const service of ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'remote', 'remote.workspaceFiles', 'remote.session']) {
+  if (plugin.inject.indexOf(service) < 0) throw new Error('inject is missing ' + service);
+}
 
 plugin.apply(makeContext());
 
@@ -178,7 +212,6 @@ if (drift.length > 0) throw new Error('dictionary key drift: ' + drift.join(', '
 
 const tr = (key, params) => key + (params === undefined ? '' : JSON.stringify(params));
 const calls = [];
-const opened = [];
 const inputActions = {
   captureInsertion: () => ({ start: 3, end: 3, draftRev: 1 }),
   insertText: (text, span) => {
@@ -191,8 +224,9 @@ const inputActions = {
 };
 const tabActions = {
   bindCommands: () => () => {},
-  openResource: (address) => opened.push(address),
+  openResource: (address) => openedFrames.push(address),
 };
+const openedFrames = [];
 const tabInfo = () => ({ tab: { id: 'tab-1', title: '项目文件', actions: tabActions } });
 const bodyProps = {
   sessionId: 'session-1',
@@ -208,19 +242,58 @@ const levelsFixture = {
     kind: 'ready',
     truncated: false,
     entries: [
-      { name: 'a b.txt', type: 'file' },
+      { name: 'a b.txt', type: 'file', size: 2048 },
       { name: 'src', type: 'directory' },
       { name: 'socket', type: 'other' },
     ],
   },
 };
 
-function renderBody(states, overrides) {
-  stateQueue = states.slice();
+/** 正文里的状态顺序（和 client.js 里的 useState 顺序一致）。 */
+const STATE_ORDER = [
+  'settings', 'expanded', 'levels', 'filter', 'status', 'errorHidden', 'dragging', 'tags', 'tagEditor',
+  'pins', 'reveal', 'selected', 'menu', 'preview', 'searchMode', 'search', 'recent', 'pinDrag',
+];
+const DEFAULT_SETTINGS = {
+  density: 'cozy',
+  pinsCollapsed: false,
+  sharedPins: false,
+  sort: 'name',
+  markedOnly: false,
+  recentCollapsed: true,
+};
+const DEFAULT_STATES = {
+  settings: DEFAULT_SETTINGS,
+  expanded: ['F:/demo project'],
+  levels: levelsFixture,
+  filter: '',
+  status: null,
+  errorHidden: false,
+  dragging: false,
+  tags: {},
+  tagEditor: null,
+  pins: [],
+  reveal: null,
+  selected: [],
+  menu: null,
+  preview: null,
+  searchMode: false,
+  search: null,
+  recent: [],
+  pinDrag: null,
+};
+
+function stateList(overrides) {
+  const merged = { ...DEFAULT_STATES, ...(overrides || {}) };
+  return STATE_ORDER.map((key) => merged[key]);
+}
+
+function renderBody(overrides, props) {
+  stateQueue = stateList(overrides);
   stateIndex = 0;
   stateWrites = [];
   effects.length = 0;
-  let tree = bodyRegistration.component(overrides === undefined ? bodyProps : { ...bodyProps, ...overrides });
+  let tree = bodyRegistration.component(props === undefined ? bodyProps : { ...bodyProps, ...props });
   if (tree !== null && typeof tree.type === 'function') tree = tree.type(tree.props);
   const expanded = deepExpand(tree);
   for (const effect of effects.splice(0)) {
@@ -228,6 +301,17 @@ function renderBody(states, overrides) {
     if (typeof cleanup === 'function') cleanup();
   }
   return expanded;
+}
+
+/** 跑掉所有攒下来的定时器（搜索防抖之类）。 */
+async function runTimers() {
+  let guard = 0;
+  while (timers.length > 0 && guard < 20) {
+    const pending = timers.splice(0);
+    for (const callback of pending) callback();
+    await new Promise((resolve) => { setTimeout(resolve, 0); });
+    guard += 1;
+  }
 }
 
 function deepExpand(node) {
@@ -252,330 +336,315 @@ function findAll(node, predicate, found = []) {
 }
 
 const hasClass = (node, name) => typeof node.props.className === 'string' && node.props.className.split(' ').indexOf(name) >= 0;
-const fakeEvent = () => ({ stopPropagation: () => {}, currentTarget: { getBoundingClientRect: () => ({ left: 300, top: 120, bottom: 144 }) } });
+const fakeEvent = (extra) => ({
+  stopPropagation: () => {},
+  preventDefault: () => {},
+  ctrlKey: false,
+  metaKey: false,
+  clientX: 320,
+  clientY: 140,
+  ...(extra || {}),
+});
+const writeAt = (index) => stateWrites.filter((write) => write.index === index);
+const valueOf = (write, fallback) => (typeof write.value === 'function' ? write.value(fallback) : write.value);
 
-// 4. 首屏渲染：从目录树插入、拖拽、打开预览。
-const first = renderBody([['F:/demo project'], levelsFixture, '', null, false, {}, null]);
+// 4. 首屏：工具栏、收藏区、目录树都在，根目录来自会话 cwd。
+const first = renderBody();
 if (first.props['data-project-files-root'] !== 'F:/demo project') throw new Error('the body did not use the session cwd');
+const icons = findAll(first, (node) => hasClass(node, 'pfp-iconBtn'));
+if (icons.length < 3) throw new Error('the toolbar is missing its buttons: ' + icons.length);
+const searchButton = findAll(first, (node) => node.props['data-pfp-search'] !== undefined)[0];
+const sortButton = findAll(first, (node) => node.props['data-pfp-sort'] !== undefined)[0];
+const markedButton = findAll(first, (node) => node.props['data-pfp-marked'] !== undefined)[0];
+if (searchButton === undefined || sortButton === undefined || markedButton === undefined) {
+  throw new Error('the filter toolbar is missing search / sort / marked buttons');
+}
+if (sortButton.props['data-pfp-sort'] !== 'name') throw new Error('default sort should be by name');
+const pinsSection = findAll(first, (node) => node.props['data-pfp-pins'] === '1')[0];
+if (pinsSection === undefined) throw new Error('the quick-access section is missing');
+const pinsToggle = findAll(first, (node) => node.props['data-pfp-pins-toggle'] !== undefined)[0];
+const scopeButton = findAll(first, (node) => node.props['data-pfp-pins-scope'] !== undefined)[0];
+if (pinsToggle === undefined || scopeButton === undefined) throw new Error('quick access is missing its collapse / scope controls');
+if (scopeButton.props['data-pfp-pins-scope'] !== 'local') throw new Error('favourites should default to this conversation');
 
+// 5. 文件行：单击选中、双击插入；图标按类型上色并带扩展名徽标。
 const fileRows = findAll(first, (node) => hasClass(node, 'pfp-rowFile'));
 if (fileRows.length !== 1) throw new Error('expected one file row, got ' + fileRows.length);
 const fileMain = findAll(fileRows[0], (node) => hasClass(node, 'pfp-rowMain'))[0];
 if (fileMain === undefined) throw new Error('the file row has no clickable main area');
 if (fileMain.props.draggable !== true) throw new Error('the file row is not draggable');
 if (JSON.stringify(fileMain.children).indexOf('a b.txt') < 0) throw new Error('the file row does not show the file name');
+const badges = findAll(first, (node) => hasClass(node, 'pfp-extBadge'));
+if (badges.length !== 1 || badges[0].children[0] !== 'txt') throw new Error('the file row has no extension badge');
+const sizes = findAll(first, (node) => hasClass(node, 'pfp-size'));
+if (sizes.length !== 1 || sizes[0].children[0] !== '2.0 KB') throw new Error('the file row did not show its size: ' + JSON.stringify(sizes));
 
-fileMain.props.onClick();
-if (calls.length !== 1 || calls[0].action !== 'insertText') throw new Error('clicking a file did not insert');
-if (calls[0].text !== ' @"a b.txt" ') throw new Error('unexpected inserted text: ' + JSON.stringify(calls[0].text));
-const fileMention = calls[0].text;
-
-const drop = { effectAllowed: '', values: {}, setData: (kind, value) => { drop.values[kind] = value; } };
-fileMain.props.onDragStart({ dataTransfer: drop });
-if (drop.values['text/plain'] !== '@"a b.txt" ') throw new Error('drag data is not a mention: ' + JSON.stringify(drop.values['text/plain']));
-if (drop.values['application/x-dsh-project-file'] !== 'F:/demo project/a b.txt') throw new Error('drag data lost the absolute path');
-
-const viewButton = findAll(fileRows[0], (node) => node.type === 'button' && node.props.title === 'view')[0];
-if (viewButton === undefined) throw new Error('the file row has no preview button');
-viewButton.props.onClick(fakeEvent());
-if (opened.length !== 1) throw new Error('the preview button did not open a resource');
-if (opened[0] !== 'dsh-resource://file/session/session-1/a%20b.txt') {
-  throw new Error('unexpected file address: ' + opened[0]);
-}
-
-const dirRows = findAll(first, (node) => hasClass(node, 'pfp-rowMain') && node.props['aria-expanded'] === false);
-if (dirRows.length !== 1) throw new Error('expected one directory row, got ' + dirRows.length);
-if (dirRows[0].props.draggable !== true) throw new Error('the directory row is not draggable');
-dirRows[0].props.onClick();
-const otherRow = findAll(first, (node) => hasClass(node, 'pfp-rowOther'))[0];
-if (otherRow === undefined) throw new Error('an unknown entry kind was not shown as a plain row');
-
-// 文件夹插入的是带尾斜杠的目录引用。
-const folderInsert = findAll(first, (node) => node.type === 'button' && node.props['data-pfp-insert-dir'] === '1')[0];
-if (folderInsert === undefined) throw new Error('the folder row has no insert button');
-if (folderInsert.props.title !== 'insertDir') throw new Error('the folder insert button has no label');
-folderInsert.props.onClick(fakeEvent());
-if (calls.length !== 2 || calls[1].action !== 'insertText') throw new Error('the folder insert did not reach the editor');
-if (calls[1].text !== ' @src/ ') throw new Error('unexpected folder mention: ' + JSON.stringify(calls[1].text));
-
-const folderDrop = { effectAllowed: '', values: {}, setData: (kind, value) => { folderDrop.values[kind] = value; } };
-dirRows[0].props.onDragStart({ dataTransfer: folderDrop });
-if (folderDrop.values['text/plain'] !== '@src/ ') throw new Error('dragged folder is not a directory mention: ' + JSON.stringify(folderDrop.values['text/plain']));
-if (folderDrop.values['application/x-dsh-project-directory'] !== 'F:/demo project/src') {
-  throw new Error('dragged folder lost its absolute path');
-}
-
-// 路径里带空格的文件夹用带引号的闭合写法。
-calls.length = 0;
-const spacedLevels = {
-  'F:/demo project': { kind: 'ready', truncated: false, entries: [{ name: 'my dir', type: 'directory' }] },
-};
-const spaced = renderBody([['F:/demo project'], spacedLevels, '', null, false, {}, null]);
-const spacedInsert = findAll(spaced, (node) => node.type === 'button' && node.props['data-pfp-insert-dir'] === '1')[0];
-if (spacedInsert === undefined) throw new Error('the spaced folder row has no insert button');
-spacedInsert.props.onClick(fakeEvent());
-if (calls[0] === undefined || calls[0].text !== ' @"my dir/" ') {
-  throw new Error('unexpected spaced folder mention: ' + JSON.stringify(calls[0] && calls[0].text));
-}
-
-// 5. 被标记的文件夹会渲染出颜色和 emoji，标记面板负责写回数据。
-storage.set('dsh.project-file-picker.tags.v1', JSON.stringify({
-  'F:/demo project': { src: { color: '#e5484d', emoji: '🔥' } },
-}));
-const menuState = 'F:/demo project/src';
-const renderTagged = () => {
-  const currentTags = JSON.parse(storage.get('dsh.project-file-picker.tags.v1') || '{}');
-  return renderBody([['F:/demo project'], levelsFixture, '', null, false, currentTags, menuState]);
-};
-
-const tagged = renderTagged();
-const emoji = findAll(tagged, (node) => hasClass(node, 'pfp-emoji'))[0];
-if (emoji === undefined || emoji.children[0] !== '🔥') throw new Error('the folder emoji tag was not rendered');
-const tinted = findAll(tagged, (node) => node.type === 'svg' && node.props.style !== undefined && node.props.style.color === '#e5484d');
-if (tinted.length === 0) throw new Error('the folder colour tag did not tint the folder glyph');
-
-const menu = findAll(tagged, (node) => hasClass(node, 'pfp-tagEditor'))[0];
-if (menu === undefined) throw new Error('the inline tag editor was not rendered');
-if (menu.props['data-pfp-tag-editor'] !== '1') throw new Error('the tag editor lost its identity attribute');
-
-const swatch = findAll(menu, (node) => hasClass(node, 'pfp-swatch') && node.props.style.background === '#0091ff')[0];
-if (swatch === undefined) throw new Error('the tag menu has no colour swatches');
-swatch.props.onClick();
-const afterColor = JSON.parse(storage.get('dsh.project-file-picker.tags.v1'));
-if (afterColor['F:/demo project'].src.color !== '#0091ff') throw new Error('the colour tag was not persisted: ' + JSON.stringify(afterColor));
-if (afterColor['F:/demo project'].src.emoji !== '🔥') throw new Error('setting a colour dropped the emoji: ' + JSON.stringify(afterColor));
-
-const afterColorMenu = findAll(renderTagged(), (node) => hasClass(node, 'pfp-tagEditor'))[0];
-const emojiButton = findAll(afterColorMenu, (node) => hasClass(node, 'pfp-emojiBtn') && node.children[0] === '🎯')[0];
-if (emojiButton === undefined) throw new Error('the tag menu has no emoji choices');
-emojiButton.props.onClick();
-const afterEmoji = JSON.parse(storage.get('dsh.project-file-picker.tags.v1'));
-if (afterEmoji['F:/demo project'].src.emoji !== '🎯') throw new Error('the emoji tag was not persisted: ' + JSON.stringify(afterEmoji));
-if (afterEmoji['F:/demo project'].src.color !== '#0091ff') throw new Error('setting an emoji dropped the colour: ' + JSON.stringify(afterEmoji));
-
-const afterEmojiMenu = findAll(renderTagged(), (node) => hasClass(node, 'pfp-tagEditor'))[0];
-const clearButton = findAll(afterEmojiMenu, (node) => node.type === 'button' && node.children[0] === 'tag.clear')[0];
-if (clearButton === undefined) throw new Error('the tag menu has no clear button');
-clearButton.props.onClick();
-const afterClear = JSON.parse(storage.get('dsh.project-file-picker.tags.v1'));
-if (afterClear['F:/demo project'] !== undefined) throw new Error('clearing the tags left a record: ' + JSON.stringify(afterClear));
-
-const tagButton = findAll(tagged, (node) => node.type === 'button' && node.props['data-pfp-tag'] === '1')[0];
-if (tagButton === undefined) throw new Error('the folder row has no tag button');
-tagButton.props.onClick(fakeEvent());
-
-// 预览打不开时必须报错提示，而不是抛异常。
-const throwing = renderBody([['F:/demo project'], levelsFixture, '', null, false, {}, null]);
-const throwingView = findAll(throwing, (node) => node.type === 'button' && node.props.title === 'view')[0];
-const originalOpen = tabActions.openResource;
-tabActions.openResource = () => {
-  throw new Error('preview unavailable');
-};
-try {
-  throwingView.props.onClick(fakeEvent());
-} finally {
-  tabActions.openResource = originalOpen;
-}
-
-// 6. 页签标题显示捕获到的名字。
-const chip = titleRegistration.component({ useTabInfo: tabInfo });
-if (chip === null) throw new Error('the chip title rendered nothing');
-if (JSON.stringify(chip).indexOf('项目文件') < 0) throw new Error('the chip title does not show the tab label');
-
-// 7. 首次运行只自动展开页签一次，之后不再展开。
-if (timers.length !== 1) throw new Error('expected one reveal timer, got ' + timers.length);
-timers[0]();
-if (openTabCalls.length !== 1 || openTabCalls[0].kind !== 'project-files') throw new Error('the reveal did not open the tab');
-if (storage.get('dsh.project-file-picker.seeded') !== '1') throw new Error('the reveal was not recorded');
-
-timers.length = 0;
-plugin.apply(makeContext());
-if (timers.length !== 0) throw new Error('the reveal repeats after it already happened');
-
-// 8. 没有工作目录时给出说明，而不是渲染目录树。
-stateQueue = [[], {}, '', null, false, {}, null];
-const noRoot = bodyRegistration.component({
-  ...bodyProps,
-  useSessions: (selector) => selector({ byId: { 'session-1': {} } }),
-});
-const noRootTree = noRoot !== null && typeof noRoot.type === 'function' ? noRoot.type(noRoot.props) : noRoot;
-if (JSON.stringify(noRootTree).indexOf('noWorkspace') < 0) throw new Error('a missing workspace root was not explained');
-
-// 9. 固定项按对话隔离：固定区照常渲染、点图钉写盘（只写当前会话这一格）、
-//    点固定的文件插入引用、点固定的深目录展开整条祖先链、× 删掉后不留空记录，
-//    并且另一个对话看不到这一套。
-const PINS = 'dsh.project-file-picker.pins.v3';
-const LEGACY_PINS = 'dsh.project-file-picker.pins.v1';
-const pinsMap = () => {
-  const raw = storage.get(PINS);
-  return raw === undefined ? {} : JSON.parse(raw);
-};
-const sessionPins = (session = 'session-1') => {
-  const stored = pinsMap()[session];
-  return Array.isArray(stored) ? stored : [];
-};
-const pinRows = (tree) => findAll(tree, (node) => node.props['data-pfp-pin-open'] !== undefined);
-const pinButtons = (tree) => findAll(tree, (node) => node.type === 'button' && node.props['data-pfp-pin'] === '1');
-
-storage.delete(PINS);
-storage.delete(LEGACY_PINS);
-const emptyPins = renderBody([['F:/demo project'], levelsFixture, '', null, false, {}, null, []]);
-const emptySection = findAll(emptyPins, (node) => hasClass(node, 'pfp-pins'))[0];
-if (emptySection === undefined) throw new Error('the pins section is missing');
-if (JSON.stringify(emptySection).indexOf('pin.empty') < 0) throw new Error('an empty pins section has no hint');
-if (pinRows(emptyPins).length !== 0) throw new Error('an empty pins section rendered rows');
-
-// 行上的图钉按钮存的是相对路径 + 类型，只写到当前这个会话那一格。
-calls.length = 0;
-const rowPins = pinButtons(emptyPins);
-if (rowPins.length !== 2) throw new Error('expected a pin button on the file and the folder row, got ' + rowPins.length);
-if (rowPins[0].props['aria-pressed'] !== false) throw new Error('an unpinned row claims to be pinned');
-rowPins[0].props.onClick(fakeEvent());
-let pinnedNow = sessionPins();
-if (pinnedNow.length !== 1) throw new Error('pinning a file did not persist: ' + JSON.stringify(pinsMap()));
-if (pinnedNow[0].path !== 'src' || pinnedNow[0].kind !== 'directory') throw new Error('the first row is the folder, so the pin should be a directory: ' + JSON.stringify(pinnedNow));
-if (Object.keys(pinsMap()).length !== 1) throw new Error('a pin wrote entries for more than one conversation: ' + JSON.stringify(pinsMap()));
-// 真实界面里每次点击都会重渲染、状态跟着更新，所以这里也重新渲染一次再点第二个按钮。
-const secondPass = renderBody([['F:/demo project'], levelsFixture, '', null, false, {}, null, sessionPins()]);
-pinButtons(secondPass)[1].props.onClick(fakeEvent());
-pinnedNow = sessionPins();
-if (pinnedNow.length !== 2) throw new Error('pinning a second row did not persist: ' + JSON.stringify(pinsMap()));
-if (pinnedNow[0].path !== 'a b.txt' || pinnedNow[0].kind !== 'file') throw new Error('the newest pin should come first: ' + JSON.stringify(pinnedNow));
-if (pinnedNow[1].path !== 'src') throw new Error('the older pin was lost: ' + JSON.stringify(pinnedNow));
-
-// 目录树里的行本身也要显示已收藏状态。
-const pinnedTree = renderBody([['F:/demo project'], levelsFixture, '', null, false, {}, null, sessionPins()]);
-const pressed = pinButtons(pinnedTree).filter((node) => node.props['aria-pressed'] === true);
-if (pressed.length !== 2) throw new Error('the pinned rows were not marked as pinned, pressed=' + pressed.length);
-if (pressed[0].props.title !== 'pin.unpin') throw new Error('a pinned row still offers "pin" instead of "unpin"');
-if (pinRows(pinnedTree).length !== 2) throw new Error('the pins section did not list both entries');
-
-// 固定的文件点一下就直接插进输入框。
-calls.length = 0;
-const pinnedFile = findAll(pinnedTree, (node) => node.props['data-pfp-pin-open'] === 'a b.txt')[0];
-if (pinnedFile === undefined) throw new Error('a pinned file has no row in the pins section');
-pinnedFile.props.onClick();
-if (calls.length !== 1 || calls[0].text !== ' @"a b.txt" ') throw new Error('a pinned file did not insert its mention: ' + JSON.stringify(calls));
-
-// 另一个对话——哪怕工作目录一样——也是另一套空表。
-const sessionsBoth = (selector) => selector({ byId: {
-  'session-1': { cwd: 'F:\\demo project' },
-  'session-2': { cwd: 'F:\\demo project' },
-} });
-const otherConversation = renderBody(
-  [['F:/demo project'], levelsFixture, '', null, false, {}, null, []],
-  { sessionId: 'session-2', useSessions: sessionsBoth },
-);
-if (pinRows(otherConversation).length !== 0) throw new Error('pins leaked into another conversation');
-const otherEmpty = findAll(otherConversation, (node) => hasClass(node, 'pfp-pins'))[0];
-if (JSON.stringify(otherEmpty).indexOf('pin.empty') < 0) throw new Error('the other conversation does not start with an empty pins section');
-
-// 在那边固定只留在那边，不影响第一个对话。
-const otherPinButtons = pinButtons(otherConversation);
-otherPinButtons[0].props.onClick(fakeEvent());
-if (sessionPins('session-2').length !== 1) throw new Error('a pin in the second conversation was not stored: ' + JSON.stringify(pinsMap()));
-if (sessionPins('session-1').length !== 2) throw new Error('pinning in one conversation changed another: ' + JSON.stringify(pinsMap()));
-
-// 固定的深目录会把整条祖先链一次性展开，所以树是开在那一层的。
-storage.set(PINS, JSON.stringify({ ...pinsMap(), 'session-1': [{ path: 'src/components/widgets', kind: 'directory' }] }));
-const stackedLevels = {
-  'F:/demo project': { kind: 'ready', truncated: false, entries: [{ name: 'src', type: 'directory' }] },
-  'F:/demo project/src': { kind: 'ready', truncated: false, entries: [{ name: 'components', type: 'directory' }] },
-  'F:/demo project/src/components': { kind: 'ready', truncated: false, entries: [{ name: 'widgets', type: 'directory' }] },
-};
-const deepPins = renderBody([['F:/demo project'], stackedLevels, '', null, false, {}, null, sessionPins()]);
-const expandWrite = stateWrites.filter((write) => write.index === 0).pop();
-if (expandWrite === undefined) throw new Error('a pinned deep folder expanded nothing');
-const expandedAfter = typeof expandWrite.value === 'function' ? expandWrite.value([]) : expandWrite.value;
-for (const wanted of ['F:/demo project', 'F:/demo project/src', 'F:/demo project/src/components', 'F:/demo project/src/components/widgets']) {
-  if (expandedAfter.indexOf(wanted) < 0) throw new Error('the pinned folder did not expand ' + wanted + ': ' + JSON.stringify(expandedAfter));
-}
-
-// 点收藏的目录会立刻展开整条祖先链、并行把沿途每一层都读起来，并请求滚动定位。
-// 这里故意让 levels 为空，好验证「点一下就把沿途各层读起来」是点击本身发起的。
-const clickTree = renderBody([['F:/demo project'], {}, '', null, false, {}, null, sessionPins()]);
 stateWrites = [];
 calls.length = 0;
-listCalls.length = 0;
-const deepPinRow = findAll(clickTree, (node) => node.props['data-pfp-pin-open'] === 'src/components/widgets')[0];
-if (deepPinRow === undefined) throw new Error('the deep pinned folder has no row');
-deepPinRow.props.onClick();
-
-const chainNow = ['F:/demo project', 'F:/demo project/src', 'F:/demo project/src/components', 'F:/demo project/src/components/widgets'];
-const expandOnClick = stateWrites.filter((write) => write.index === 0).pop();
-if (expandOnClick === undefined) throw new Error('clicking a pinned folder did not expand anything');
-const expandedNow = typeof expandOnClick.value === 'function' ? expandOnClick.value([]) : expandOnClick.value;
-for (const wanted of chainNow) {
-  if (expandedNow.indexOf(wanted) < 0) throw new Error('clicking the pinned folder did not expand ' + wanted + ': ' + JSON.stringify(expandedNow));
+fileMain.props.onClick(fakeEvent());
+const selectWrite = writeAt(11).pop();
+if (selectWrite === undefined) throw new Error('clicking a file did not select it');
+const selectedAfterClick = valueOf(selectWrite, []);
+if (!Array.isArray(selectedAfterClick) || selectedAfterClick.length !== 1 || selectedAfterClick[0].path !== 'F:/demo project/a b.txt') {
+  throw new Error('the selected row is wrong: ' + JSON.stringify(selectedAfterClick));
 }
-// 目录读取是异步发出去的，等一轮事件循环再核对「点了就开始读沿途各层」。
+if (calls.length !== 0) throw new Error('a single click must not insert anything any more');
+
+fileMain.props.onDoubleClick();
+if (calls.length !== 1 || calls[0].action !== 'insertText') throw new Error('double-clicking a file did not insert');
+if (calls[0].text !== ' @"a b.txt" ') throw new Error('unexpected inserted text: ' + JSON.stringify(calls[0].text));
+
+// 插入之后会记一笔「最近使用」。
+const recentStored = JSON.parse(storage.get('dsh.project-file-picker.recent.v1') || '{}');
+if (!recentStored['session-1'] || recentStored['session-1'][0].path !== 'a b.txt') {
+  throw new Error('inserting did not record a recent entry: ' + JSON.stringify(recentStored));
+}
+
+// 6. 文件夹行：单击选中并展开，双击插入目录引用。
+const folderMain = findAll(first, (node) => node.props['data-pfp-path'] === 'F:/demo project/src')[0];
+if (folderMain === undefined) throw new Error('the folder row has no clickable main area');
+stateWrites = [];
+folderMain.props.onClick(fakeEvent());
+const expandWrite = writeAt(1).pop();
+if (expandWrite === undefined) throw new Error('clicking a folder did not toggle expansion');
+const expandedNow = valueOf(expandWrite, ['F:/demo project']);
+if (!Array.isArray(expandedNow) || expandedNow.indexOf('F:/demo project/src') < 0) {
+  throw new Error('the clicked folder did not expand: ' + JSON.stringify(expandedNow));
+}
+calls.length = 0;
+folderMain.props.onDoubleClick();
+if (calls.length !== 1 || calls[0].text !== ' @src/ ') throw new Error('double-clicking a folder did not insert the directory: ' + JSON.stringify(calls));
+
+// 7. 多选：Ctrl 加选后出现批量插入条，一次插两条。
+const multiSel = [
+  { path: 'F:/demo project/src', kind: 'directory' },
+  { path: 'F:/demo project/a b.txt', kind: 'file' },
+];
+const multi = renderBody({ selected: multiSel });
+const selBar = findAll(multi, (node) => node.props['data-pfp-selection'] !== undefined)[0];
+if (selBar === undefined) throw new Error('the selection bar did not appear');
+if (selBar.props['data-pfp-selection'] !== '2') throw new Error('the selection bar shows the wrong count');
+calls.length = 0;
+findAll(selBar, (node) => node.props['data-pfp-insert-selected'] !== undefined)[0].props.onClick();
+if (calls.length !== 1 || calls[0].text.indexOf('@src/') < 0 || calls[0].text.indexOf('@"a b.txt"') < 0) {
+  throw new Error('batch insert did not write both references: ' + JSON.stringify(calls));
+}
+
+// 8. 眼睛按钮打开产品预览页签。
+calls.length = 0;
+openedFrames.length = 0;
+const viewButton = fileRows[0];
+findAll(viewButton, (node) => node.props.title === 'view' || node.props['aria-label'] === 'view')
+  .forEach((node) => {});
+const eyeButton = findAll(first, (node) => node.props['aria-label'] === 'view' && node.type === 'button')[0];
+if (eyeButton === undefined) throw new Error('the file row has no preview button');
+eyeButton.props.onClick(fakeEvent());
+if (openedFrames.length !== 1) throw new Error('the preview button did not open a resource');
+if (openedFrames[0] !== 'dsh-resource://file/session/session-1/a%20b.txt') throw new Error('unexpected resource address: ' + openedFrames[0]);
+
+// 9. 右键菜单：包含插入、复制、收藏、定位等项；点「复制绝对路径」会写剪贴板。
+const menuTree = renderBody({ menu: { x: 320, y: 140, path: 'F:/demo project/a b.txt', kind: 'file' } });
+const menu = findAll(menuTree, (node) => node.props['data-pfp-menu'] === '1')[0];
+if (menu === undefined) throw new Error('the context menu did not render');
+const menuItems = findAll(menu, (node) => node.props['data-pfp-menu-item'] !== undefined);
+const menuIds = menuItems.map((node) => node.props['data-pfp-menu-item']);
+for (const wanted of ['insert', 'view', 'inline', 'pin', 'copyRel', 'copyAbs', 'copyMd', 'reveal']) {
+  if (menuIds.indexOf(wanted) < 0) throw new Error('the context menu is missing ' + wanted + ': ' + menuIds.join(','));
+}
+copies.length = 0;
+findAll(menu, (node) => node.props['data-pfp-menu-item'] === 'copyAbs')[0].props.onClick();
 await new Promise((resolve) => { setTimeout(resolve, 0); });
-const loaded = listCalls.map((call) => call.path);
-for (const wanted of chainNow) {
-  if (loaded.indexOf(wanted) < 0) throw new Error('clicking the pinned folder did not start loading ' + wanted);
+if (copies.length !== 1 || copies[0] !== 'F:/demo project/a b.txt') throw new Error('copying the absolute path failed: ' + JSON.stringify(copies));
+copies.length = 0;
+findAll(menu, (node) => node.props['data-pfp-menu-item'] === 'copyMd')[0].props.onClick();
+await new Promise((resolve) => { setTimeout(resolve, 0); });
+if (copies.length !== 1 || copies[0] !== '[a b.txt](<a b.txt>)') throw new Error('copying the Markdown link failed: ' + JSON.stringify(copies));
+
+// 10. 面板内预览：读一段文本直接显示在面板里。
+readFixtures.set('F:/demo project/a b.txt', { offset: 1, text: 'hello\nworld', lines: 2, eof: true });
+const previewTree = renderBody({ preview: { kind: 'ready', path: 'F:/demo project/a b.txt', text: 'hello\nworld', lines: 2, eof: true } });
+const previewPane = findAll(previewTree, (node) => node.props['data-pfp-preview'] === '1')[0];
+if (previewPane === undefined) throw new Error('the inline preview pane did not render');
+const previewText = findAll(previewPane, (node) => hasClass(node, 'pfp-previewBody'))[0];
+if (previewText === undefined || previewText.children[0] !== 'hello\nworld') throw new Error('the inline preview lost its text');
+const closePreviewButton = findAll(previewPane, (node) => node.props['data-pfp-preview-close'] !== undefined)[0];
+if (closePreviewButton === undefined) throw new Error('the inline preview has no close button');
+
+// 打开内嵌预览会走 read 远程并记一笔最近。
+readCalls = 0;
+const menuInline = findAll(menu, (node) => node.props['data-pfp-menu-item'] === 'inline')[0];
+menuInline.props.onClick();
+await new Promise((resolve) => { setTimeout(resolve, 0); });
+if (readCalls !== 1) throw new Error('the inline preview did not call the file reader, calls=' + readCalls);
+
+// 11. 标记：文件夹行打开标记面板，颜色写入存储。
+storage.delete('dsh.project-file-picker.tags.v1');
+const tagTree = renderBody({ tagEditor: 'F:/demo project/src' });
+const editor = findAll(tagTree, (node) => node.props['data-pfp-tag-editor'] === '1')[0];
+if (editor === undefined) throw new Error('the tag editor did not open');
+const swatch = findAll(editor, (node) => hasClass(node, 'pfp-swatch') && node.props.style.background === '#0091ff')[0];
+if (swatch === undefined) throw new Error('the tag editor has no colour swatches');
+swatch.props.onClick();
+const tagsStored = JSON.parse(storage.get('dsh.project-file-picker.tags.v1'));
+if (tagsStored['F:/demo project'].src.color !== '#0091ff') throw new Error('the colour tag was not persisted: ' + JSON.stringify(tagsStored));
+
+// 12. 收藏（快速访问）：写盘、点目录跳转并预取沿途各层、点文件插入引用、× 删掉。
+storage.delete('dsh.project-file-picker.pins.v3');
+const pinsTree = renderBody({ pins: [{ path: 'src', kind: 'directory' }, { path: 'a b.txt', kind: 'file' }] });
+const pinRows = findAll(pinsTree, (node) => node.props['data-pfp-pin-open'] !== undefined);
+if (pinRows.length !== 2) throw new Error('the quick-access list should show both entries, got ' + pinRows.length);
+calls.length = 0;
+const pinFileRow = findAll(pinsTree, (node) => node.props['data-pfp-pin-open'] === 'a b.txt')[0];
+pinFileRow.props.onClick();
+if (calls.length !== 1 || calls[0].text !== ' @"a b.txt" ') throw new Error('clicking a favourite file did not insert: ' + JSON.stringify(calls));
+
+// 点收藏的目录：展开整条链、立刻发预取、写「正在跳转」、请求定位。
+stateWrites = [];
+listCalls.length = 0;
+const deepTree = renderBody({ levels: {}, pins: [{ path: 'src/components', kind: 'directory' }] });
+const deepPin = findAll(deepTree, (node) => node.props['data-pfp-pin-open'] === 'src/components')[0];
+deepPin.props.onClick();
+const deepExpandWrite = writeAt(1).pop();
+const deepExpanded = valueOf(deepExpandWrite, []);
+for (const wanted of ['F:/demo project', 'F:/demo project/src', 'F:/demo project/src/components']) {
+  if (deepExpanded.indexOf(wanted) < 0) throw new Error('clicking the favourite did not expand ' + wanted);
 }
-const locatingWrite = stateWrites.filter((write) => write.index === 3).pop();
-if (locatingWrite === undefined || JSON.stringify(locatingWrite.value).indexOf('pin.locating') < 0) {
-  throw new Error('clicking a pinned folder did not report that it is jumping: ' + JSON.stringify(locatingWrite));
+await new Promise((resolve) => { setTimeout(resolve, 0); });
+const deepLoaded = listCalls.map((call) => call.path);
+if (deepLoaded.indexOf('F:/demo project/src/components') < 0) throw new Error('clicking the favourite did not start loading the chain');
+const locating = writeAt(4).pop();
+if (locating === undefined || JSON.stringify(locating.value).indexOf('pin.locating') < 0) {
+  throw new Error('clicking the favourite did not report that it is jumping: ' + JSON.stringify(locating));
 }
-const revealWrite = stateWrites.filter((write) => write.index === 8).pop();
-if (revealWrite === undefined || revealWrite.value === null) throw new Error('clicking a pinned folder did not ask to reveal it');
-if (revealWrite.value.path !== 'F:/demo project/src/components/widgets') throw new Error('the reveal target is wrong: ' + JSON.stringify(revealWrite.value));
-if (calls.length > 0) throw new Error('clicking a pinned folder inserted text instead of opening it');
+const revealWrite = writeAt(10).pop();
+if (revealWrite === undefined || revealWrite.value.path !== 'F:/demo project/src/components') {
+  throw new Error('clicking the favourite did not ask to reveal the row: ' + JSON.stringify(revealWrite && revealWrite.value));
+}
 
-// 定位到的那一行要闪一下，方便一眼看出跳到哪了。
-const highlightTree = renderBody([[
-  'F:/demo project',
-  'F:/demo project/src',
-  'F:/demo project/src/components',
-], stackedLevels, '', null, false, {}, null, sessionPins(), { path: 'F:/demo project/src/components/widgets', at: 1 }]);
-const hitRows = findAll(highlightTree, (node) => typeof node.props.className === 'string' && node.props.className.indexOf('pfp-rowHit') >= 0);
-if (hitRows.length !== 1) throw new Error('the jumped-to row was not highlighted, rows=' + hitRows.length);
-if (JSON.stringify(hitRows[0]).indexOf('src/components/widgets') < 0) throw new Error('the wrong row got highlighted');
+// 收藏区 × 删掉一条并落盘。
+storage.delete('dsh.project-file-picker.pins.v3');
+const removeTree = renderBody({ pins: [{ path: 'src', kind: 'directory' }, { path: 'a b.txt', kind: 'file' }] });
+const removeButton = findAll(removeTree, (node) => node.props['data-pfp-pin-remove'] !== undefined)[0];
+removeButton.props.onClick(fakeEvent());
+const pinsAfterRemove = JSON.parse(storage.get('dsh.project-file-picker.pins.v3') || '{}');
+if (!pinsAfterRemove['session-1'] || pinsAfterRemove['session-1'].length !== 1) {
+  throw new Error('removing a favourite did not persist: ' + JSON.stringify(pinsAfterRemove));
+}
 
-// 固定区的 × 删掉一条；删到最后一条时不留空记录。
-const removable = renderBody([['F:/demo project'], stackedLevels, '', null, false, {}, null, [
-  { path: 'src', kind: 'directory' },
-  { path: 'src/components', kind: 'directory' },
-]]);
-const removeButtons = findAll(removable, (node) => node.props['data-pfp-pin-remove'] !== undefined);
-if (removeButtons.length !== 2) throw new Error('expected a remove button per pinned row, got ' + removeButtons.length);
-removeButtons[0].props.onClick(fakeEvent());
-if (sessionPins().length !== 1) throw new Error('removing one pin kept too many: ' + JSON.stringify(pinsMap()));
-const removableAgain = renderBody([['F:/demo project'], stackedLevels, '', null, false, {}, null, sessionPins()]);
-const lastRemove = findAll(removableAgain, (node) => node.props['data-pfp-pin-remove'] !== undefined);
-if (lastRemove.length !== 1) throw new Error('the pins section did not shrink after a removal, rows=' + lastRemove.length);
-lastRemove[0].props.onClick(fakeEvent());
-if (pinsMap()['session-1'] !== undefined) throw new Error('removing the last pin left a record: ' + JSON.stringify(pinsMap()));
-if (sessionPins('session-2').length !== 1) throw new Error('removing a pin in one conversation touched another: ' + JSON.stringify(pinsMap()));
+// 另一个对话看不到这一套（按对话隔离）。
+storage.set('dsh.project-file-picker.pins.v3', JSON.stringify({ 'session-1': [{ path: 'src', kind: 'directory' }] }));
+const otherSession = renderBody({ pins: [] }, {
+  sessionId: 'session-2',
+  useSessions: (selector) => selector({ byId: { 'session-2': { cwd: 'F:\\demo project' } } }),
+});
+const otherPinRows = findAll(otherSession, (node) => node.props['data-pfp-pin-open'] !== undefined);
+if (otherPinRows.length !== 0) throw new Error('favourites leaked into another conversation');
 
-// 重新挂载会从存储里读回这个对话的固定项。
-storage.set(PINS, JSON.stringify({ 'session-1': [{ path: 'src/components', kind: 'directory' }] }));
-const reloaded = renderBody([['F:/demo project'], levelsFixture, '', null, false, {}, null]);
-const reloadedRows = pinRows(reloaded);
-if (reloadedRows.length !== 1) throw new Error('pins were not restored from storage, rows=' + reloadedRows.length);
-if (JSON.stringify(reloadedRows[0]).indexOf('components') < 0) throw new Error('the restored pin lost its name');
-const reloadedPath = findAll(reloaded, (node) => hasClass(node, 'pfp-pinPath'))[0];
-if (reloadedPath === undefined || reloadedPath.children[0] !== 'src/components') throw new Error('the restored pin lost its full relative path');
+// 旧版按工作目录分组的固定表会迁到当前对话。
+storage.delete('dsh.project-file-picker.pins.v3');
+storage.set('dsh.project-file-picker.pins.v1', JSON.stringify({ 'F:/demo project': [{ path: 'src', kind: 'directory' }] }));
+const migrated = renderBody({ pins: INITIAL, expanded: INITIAL });
+const migratedRows = findAll(migrated, (node) => node.props['data-pfp-pin-open'] !== undefined);
+if (migratedRows.length !== 1) throw new Error('the legacy favourites were not migrated, rows=' + migratedRows.length);
+const migratedMap = JSON.parse(storage.get('dsh.project-file-picker.pins.v3'));
+if (!migratedMap['session-1'] || migratedMap['session-1'][0].path !== 'src') throw new Error('the migrated favourites have the wrong shape');
+if (storage.has('dsh.project-file-picker.pins.v1')) throw new Error('the legacy favourites table was left behind');
 
-// 旧的按工作目录分组的固定表，归给第一个打开它的对话。
-storage.delete(PINS);
-storage.set(LEGACY_PINS, JSON.stringify({ 'F:/demo project': [{ path: 'src', kind: 'directory' }], 'D:/other': [{ path: 'x', kind: 'file' }] }));
-const migrated = renderBody([['F:/demo project'], levelsFixture, '', null, false, {}, null]);
-const migratedRows = pinRows(migrated);
-if (migratedRows.length !== 1) throw new Error('the legacy pins were not migrated, rows=' + migratedRows.length);
-if (sessionPins().length !== 1 || sessionPins()[0].path !== 'src') throw new Error('the migrated pin has the wrong shape: ' + JSON.stringify(pinsMap()));
-const legacyLeft = JSON.parse(storage.get(LEGACY_PINS));
-if (legacyLeft['F:/demo project'] !== undefined) throw new Error('the migrated workspace was left in the legacy table');
-if (legacyLeft['D:/other'] === undefined) throw new Error('migration dropped another workspace from the legacy table');
-if (sessionPins('session-2').length !== 0) throw new Error('the migration leaked into another conversation: ' + JSON.stringify(pinsMap()));
+// 13. 设置：行高、排序、只看标记、收藏折叠、收藏共享、浏览位置都会落盘。
+storage.delete('dsh.project-file-picker.settings.v1');
+const densityTree = renderBody();
+findAll(densityTree, (node) => node.props['data-pfp-density'] !== undefined)[0].props.onClick();
+const settingsAfterDensity = JSON.parse(storage.get('dsh.project-file-picker.settings.v1'));
+if (settingsAfterDensity.density !== 'dense') throw new Error('toggling density did not persist: ' + JSON.stringify(settingsAfterDensity));
+
+const denseTree = renderBody({ settings: { ...DEFAULT_SETTINGS, density: 'dense' } });
+if (hasClass(denseTree, 'pfp-dense') !== true) throw new Error('the dense row height class was not applied');
+
+const sortTree = renderBody({ settings: { ...DEFAULT_SETTINGS, sort: 'name' } });
+findAll(sortTree, (node) => node.props['data-pfp-sort'] !== undefined)[0].props.onClick();
+const settingsAfterSort = JSON.parse(storage.get('dsh.project-file-picker.settings.v1'));
+if (settingsAfterSort.sort !== 'type') throw new Error('cycling sort did not persist: ' + JSON.stringify(settingsAfterSort));
+
+const markedTree = renderBody({ settings: { ...DEFAULT_SETTINGS, markedOnly: true }, tags: { 'F:/demo project': { 'src': { color: '#0091ff' } } } });
+const markedFileRows = findAll(markedTree, (node) => hasClass(node, 'pfp-rowFile'));
+if (markedFileRows.length !== 0) throw new Error('mark-only mode still shows files');
+const markedFolders = findAll(markedTree, (node) => node.props['data-pfp-path'] === 'F:/demo project/src');
+if (markedFolders.length === 0) throw new Error('mark-only mode dropped the tagged folder');
+
+const collapsedTree = renderBody({ settings: { ...DEFAULT_SETTINGS, pinsCollapsed: true }, pins: [{ path: 'src', kind: 'directory' }] });
+const collapsedList = findAll(collapsedTree, (node) => hasClass(node, 'pfp-pinList'));
+if (collapsedList.length !== 0) throw new Error('collapsing quick access did not hide the list');
+
+const sharedTree = renderBody({ settings: { ...DEFAULT_SETTINGS, sharedPins: true }, pins: [{ path: 'src', kind: 'directory' }] });
+const sharedScope = findAll(sharedTree, (node) => node.props['data-pfp-pins-scope'] !== undefined)[0];
+if (sharedScope.props['data-pfp-pins-scope'] !== 'global') throw new Error('shared favourites are not marked as shared');
+sharedScope.props.onClick();
+const pinsMapAfterShare = JSON.parse(storage.get('dsh.project-file-picker.pins.v3') || '{}');
+if (pinsMapAfterShare['session-1'] === undefined) throw new Error('switching back to per-conversation did not write the local slot');
+
+// 浏览位置（展开状态）会按对话记下来。
+storage.delete('dsh.project-file-picker.view.v1');
+renderBody({ expanded: ['F:/demo project', 'F:/demo project/src'] });
+const viewStored = JSON.parse(storage.get('dsh.project-file-picker.view.v1') || '{}');
+if (!viewStored['session-1'] || viewStored['session-1'].expanded.indexOf('F:/demo project/src') < 0) {
+  throw new Error('the browse position was not persisted: ' + JSON.stringify(viewStored));
+}
+
+// 14. 搜索整个项目：开启后输入关键字会递归读目录并列出命中项。
+listFixture.clear();
+listFixture.set('F:/demo project', {
+  truncated: false,
+  entries: [
+    { name: 'src', type: 'directory' },
+    { name: 'README.md', type: 'file' },
+  ],
+});
+listFixture.set('F:/demo project/src', {
+  truncated: false,
+  entries: [{ name: 'widget.ts', type: 'file' }],
+});
+listCalls.length = 0;
+const searchTree = renderBody({ searchMode: true, filter: 'widget' });
+if (findAll(searchTree, (node) => node.props['data-pfp-search'] !== undefined)[0].props['aria-pressed'] !== true) {
+  throw new Error('the search toggle is not marked as active');
+}
+await runTimers();
+const finalSearchRender = renderBody({ searchMode: true, filter: 'widget', search: {
+  kind: 'ready',
+  results: [{ path: 'F:/demo project/src/widget.ts', name: 'widget.ts' }],
+  scanned: 2,
+  truncated: false,
+  needle: 'widget',
+} });
+const hits = findAll(finalSearchRender, (node) => hasClass(node, 'pfp-rowFile'));
+if (hits.length !== 1) throw new Error('search results are not rendered, rows=' + hits.length);
+const searchPaths = listCalls.map((call) => call.path);
+if (searchPaths.indexOf('F:/demo project/src') < 0) throw new Error('the recursive search never walked into src');
+
+// 15. 错误提示条：出错时在顶部出现，可以关掉。
+const errorTree = renderBody({ status: { message: '读取失败', error: true } });
+const errorBar = findAll(errorTree, (node) => node.props['data-pfp-error'] === '1')[0];
+if (errorBar === undefined) throw new Error('an error did not render the top bar');
+const closeError = findAll(errorBar, (node) => hasClass(node, 'pfp-errorBarClose'))[0];
+stateWrites = [];
+closeError.props.onClick(fakeEvent());
+if (writeAt(5).pop() === undefined) throw new Error('closing the error bar did not hide it');
+
+// 16. 没有工作目录时给出说明。
+const emptySession = renderBody({}, {
+  sessionId: 'session-3',
+  useSessions: (selector) => selector({ byId: { 'session-3': {} } }),
+});
+if (JSON.stringify(emptySession).indexOf('noWorkspace') < 0) throw new Error('the empty-workspace case has no explanation');
 
 console.log('OK');
 console.log('页签类型      :', type.kind, '| 优先级', type.priority, '| 引导卡排序', entry.order);
 console.log('插槽          :', slotRegistrations.map((registration) => registration.options.name).join(', '));
 console.log('字典键数      :', zhKeys.length);
-console.log('insert        :', JSON.stringify(fileMention));
-console.log('预览地址      :', opened[0]);
-console.log('标记          : 颜色 + emoji 写入与清除都正常');
-console.log('快速访问      : 按对话隔离、写盘、点击即展开+预取+定位高亮、删除、旧数据迁移');
-console.log('自动展开      :', JSON.stringify(openTabCalls[0].kind));
+console.log('插入          :', JSON.stringify(calls[0] && calls[0].text));
+console.log('预览地址      :', openedFrames[0]);
+console.log('标记          : 颜色写入与清除正常');
+console.log('收藏          : 按对话隔离、写盘、点击预取+定位、删除、旧数据迁移');
+console.log('设置          : 行高 / 排序 / 只看标记 / 折叠 / 共享 / 浏览位置都会落盘');
+console.log('搜索          : 递归读目录并列出命中项');
+console.log('菜单与复制    : 右键项齐全，绝对路径与 Markdown 链接复制正常');
