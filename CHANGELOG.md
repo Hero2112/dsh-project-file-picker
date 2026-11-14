@@ -2,10 +2,11 @@
 
 > 仓库：https://github.com/Hero2112/dsh-project-file-picker （私有）
 
-插件：`@local/project-file-picker` · 当前版本 **1.6.0** · 详细说明见 [`versions/`](versions/)
+插件：`@local/project-file-picker` · 当前版本 **1.6.1** · 详细说明见 [`versions/`](versions/)
 
 | 版本 | 日期 | 类型 | 一句话 |
 |---|---|---|---|
+| [1.6.1](versions/v1.6.1.md) | 2026-11-14 | 功能移除 | 撤掉「在 Obsidian 中打开」：宿主路由在 DSH 里只接 GET/HEAD，POST 一律 405，功能从未真正生效；插件回归纯界面 |
 | [1.6.0](versions/v1.6.0.md) | 2026-11-06 | 新功能 | 「在 Obsidian 中打开」补上 Host 半：客户端 POST 本地路由，宿主用系统命令拉起 `obsidian://`，解决点了没反应 |
 | [1.5.0](versions/v1.5.0.md) | 2026-11-06 | 新功能 | 右键菜单加「在 Obsidian 中打开」：文件用 `obsidian://open?path=` 直接定位，文件夹开到所在 vault |
 | [1.4.1](versions/v1.4.1.md) | 2026-11-06 | 体验修复 | 双击文件夹不再把它折叠；Ctrl / Cmd 加选不再翻转展开状态 |
@@ -21,8 +22,9 @@
 
 每个版本都有一份**冻结快照**（完整可安装）和一份分发包；快照发布后不再改动。
 
-| 版本 | 冻结快照（当前安装的是 1.6.0） | 分发包 | 版本文档 |
+| 版本 | 冻结快照（当前安装的是 1.6.1） | 分发包 | 版本文档 |
 |---|---|---|---|
+| 1.6.1 | `releases/v1.6.1/` | `dist/project-file-picker-1.6.1.zip`（42,450 B，SHA256 `8BFD6386…7FFB7C`，顶层为 `project-file-picker/`） | [versions/v1.6.1.md](versions/v1.6.1.md) |
 | 1.6.0 | `releases/v1.6.0/` | `dist/project-file-picker-1.6.0.zip`（45,115 B，SHA256 `A967968A…C323FD`，顶层为 `project-file-picker/`） | [versions/v1.6.0.md](versions/v1.6.0.md) |
 | 1.5.0 | `releases/v1.5.0/` | `dist/project-file-picker-1.5.0.zip`（43,135 B，SHA256 `FD7B6073…0D8EB9`，顶层为 `project-file-picker/`） | [versions/v1.5.0.md](versions/v1.5.0.md) |
 | 1.4.1 | `releases/v1.4.1/` | `dist/project-file-picker-1.4.1.zip`（41,790 B，SHA256 `A65873D9…10239`，顶层为 `project-file-picker/`） | [versions/v1.4.1.md](versions/v1.4.1.md) |
@@ -38,7 +40,7 @@
 
 _（待填写。新改动先记在 `dev/` 里，发版时归入具体版本号。）_
 
-下一版计划见 [versions/v1.6.0.md](versions/v1.6.0.md) 的「下一版计划」。
+下一版计划见 [versions/v1.6.1.md](versions/v1.6.1.md) 的「下一版计划」。
 
 ## 迁移说明
 

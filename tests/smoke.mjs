@@ -462,7 +462,7 @@ const menu = findAll(menuTree, (node) => node.props['data-pfp-menu'] === '1')[0]
 if (menu === undefined) throw new Error('the context menu did not render');
 const menuItems = findAll(menu, (node) => node.props['data-pfp-menu-item'] !== undefined);
 const menuIds = menuItems.map((node) => node.props['data-pfp-menu-item']);
-for (const wanted of ['insert', 'view', 'inline', 'pin', 'copyRel', 'copyAbs', 'copyMd', 'reveal', 'obsidian']) {
+for (const wanted of ['insert', 'view', 'inline', 'pin', 'copyRel', 'copyAbs', 'copyMd', 'reveal']) {
   if (menuIds.indexOf(wanted) < 0) throw new Error('the context menu is missing ' + wanted + ': ' + menuIds.join(','));
 }
 copies.length = 0;
@@ -474,46 +474,16 @@ findAll(menu, (node) => node.props['data-pfp-menu-item'] === 'copyMd')[0].props.
 await new Promise((resolve) => { setTimeout(resolve, 0); });
 if (copies.length !== 1 || copies[0] !== '[a b.txt](<a b.txt>)') throw new Error('copying the Markdown link failed: ' + JSON.stringify(copies));
 
-// 10. 在 Obsidian 中打开：文件走 path 协议，文件夹先认 .obsidian 再开 vault。
+// 10. 1.6.1 起「在 Obsidian 中打开」已移除：右键菜单里没有这一项，
+//     也不会再向宿主路由发请求、或直接开 obsidian:// 协议。
 openedUris.length = 0;
 fetches.length = 0;
-const obsidianFileMenu = renderBody({ menu: { x: 320, y: 140, path: 'F:/demo project/a b.txt', kind: 'file' } });
-const obsidianFileItem = findAll(obsidianFileMenu, (node) => node.props['data-pfp-menu-item'] === 'obsidian')[0];
-if (obsidianFileItem === undefined) throw new Error('the context menu has no Obsidian item');
-obsidianFileItem.props.onClick();
-await new Promise((resolve) => { setTimeout(resolve, 0); });
-if (fetches.length !== 1) throw new Error('opening a file in Obsidian did not call the host route');
-if (fetches[0].url !== '/x-project-file-picker/obsidian') throw new Error('unexpected route: ' + fetches[0].url);
-const filePayload = JSON.parse(fetches[0].options.body);
-if (filePayload.mode !== 'path' || filePayload.target !== 'F:/demo project/a b.txt') {
-  throw new Error('unexpected host payload for a file: ' + JSON.stringify(filePayload));
-}
-if (openedUris.length !== 0) throw new Error('the host route worked, so the page should not try the protocol itself');
-
-listFixture.set('F:/demo project/.obsidian', { entries: [], truncated: false });
-openedUris.length = 0;
-fetches.length = 0;
-const obsidianFolderMenu = renderBody({ menu: { x: 320, y: 140, path: 'F:/demo project/src', kind: 'directory' } });
-findAll(obsidianFolderMenu, (node) => node.props['data-pfp-menu-item'] === 'obsidian')[0].props.onClick();
-await new Promise((resolve) => { setTimeout(resolve, 0); });
-if (fetches.length !== 1) throw new Error('opening a folder in Obsidian did not call the host route');
-const folderPayload = JSON.parse(fetches[0].options.body);
-if (folderPayload.mode !== 'vault' || folderPayload.vault !== 'demo project') {
-  throw new Error('a folder should be sent as a vault, got: ' + JSON.stringify(folderPayload));
-}
-
-// 宿主路由不可用时退回页面直开协议。
-const realFetch = sandbox.fetch;
-sandbox.fetch = async () => { throw new Error('route unavailable'); };
-openedUris.length = 0;
-const fallbackMenu = renderBody({ menu: { x: 320, y: 140, path: 'F:/demo project/a b.txt', kind: 'file' } });
-findAll(fallbackMenu, (node) => node.props['data-pfp-menu-item'] === 'obsidian')[0].props.onClick();
-await new Promise((resolve) => { setTimeout(resolve, 0); });
-sandbox.fetch = realFetch;
-if (openedUris.length !== 1) throw new Error('when the host route fails the page should fall back to the protocol');
-if (openedUris[0] !== 'obsidian://open?path=F%3A%2Fdemo%20project%2Fa%20b.txt') {
-  throw new Error('unexpected fallback obsidian uri: ' + openedUris[0]);
-}
+const noObsidianMenu = renderBody({ menu: { x: 320, y: 140, path: 'F:/demo project/a b.txt', kind: 'file' } });
+const noObsidianIds = findAll(noObsidianMenu, (node) => node.props['data-pfp-menu-item'] !== undefined)
+  .map((node) => node.props['data-pfp-menu-item']);
+if (noObsidianIds.indexOf('obsidian') >= 0) throw new Error('the Obsidian menu item should be gone: ' + noObsidianIds.join(','));
+if (fetches.length !== 0) throw new Error('the panel should not call the obsidian host route any more');
+if (openedUris.length !== 0) throw new Error('the panel should not open obsidian:// any more');
 
 // 11. 面板内预览：读一段文本直接显示在面板里。
 readFixtures.set('F:/demo project/a b.txt', { offset: 1, text: 'hello\nworld', lines: 2, eof: true });
@@ -703,3 +673,4 @@ console.log('收藏          : 按对话隔离、写盘、点击预取+定位、
 console.log('设置          : 行高 / 排序 / 只看标记 / 折叠 / 共享 / 浏览位置都会落盘');
 console.log('搜索          : 递归读目录并列出命中项');
 console.log('菜单与复制    : 右键项齐全，绝对路径与 Markdown 链接复制正常');
+console.log('Obsidian     : 入口已移除（1.6.1），不再请求宿主路由或直开协议');

@@ -1,4 +1,4 @@
-# 项目文件坞（Project File Dock）v1.6.0
+# 项目文件坞（Project File Dock）v1.6.1
 
 > **GitHub 仓库**：https://github.com/Hero2112/dsh-project-file-picker （私有）
 
@@ -18,7 +18,7 @@ DeepSeek Harness Web UI 插件：在**右侧边栏**里浏览当前项目（会�
 | 1 | 浏览项目文件 | 右栏页签内按会话工作目录逐层展开；顶部显示工作目录；行高可切「紧凑 / 舒适」 |
 | 2 | 单击选中、双击插入 | 单击文件行 = 选中；双击文件行 = 插入 `@相对路径`；双击文件夹 = 插入 `@相对路径/`（并保持展开）。Ctrl / Cmd 加选不会翻转展开状态。拖拽文件/文件夹进行内照旧可用 |
 | 3 | 多选批量插入 | 按 Ctrl / Cmd 点行加选；底部出现「已选 N 项」，点「插入引用」一次插入多条 |
-| 4 | 右键菜单 | 右键任意行：插入引用 / 预览页签打开 / 面板内预览 / 收藏 / 复制相对路径 / 复制绝对路径 / 复制 Markdown 链接 / 在文件管理器中显示 / **在 Obsidian 中打开** / 标记颜色和表情 |
+| 4 | 右键菜单 | 右键任意行：插入引用 / 预览页签打开 / 面板内预览 / 收藏 / 复制相对路径 / 复制绝对路径 / 复制 Markdown 链接 / 在文件管理器中显示 / 标记颜色和表情 |
 | 5 | 面板内预览 | 右键 →「在面板里预览」：直接读文件前 400 行显示在右栏底部（带行数、可继续用预览页签打开）；图片和压缩包自动改用产品预览页签 |
 | 6 | 全项目搜索 | 输入框右边的放大镜：开启后输入关键字会**递归搜索整个工作目录**（跳过 node_modules、dist 等），显示扫描进度和命中文件，双击插入 |
 | 7 | 快速访问（收藏夹） | 行上的图钉 = 收藏。收藏项在「快速访问」区：点目录立刻展开祖先链、并行读沿途各层、自动滚到位并闪高亮；点文件直接插入引用。可折叠、可拖拽排序、可导出/导入 JSON，还能切成「仅本对话 / 所有对话共用」 |
@@ -65,10 +65,7 @@ DeepSeek Harness Web UI 插件：在**右侧边栏**里浏览当前项目（会�
 | 读文本 | `ctx.remote.workspaceFiles.read(sessionId, path, { offset, limit }, signal)` | 面板内预览 |
 | 资源预览 | `tab.actions.openResource(dsh-resource://file/session/<id>/<path>)` | 眼睛按钮 / 预览页签 |
 | 系统文件管理器 | `ctx.remote.session.openWorkspacePath({ path, action: 'reveal' }, signal)` | 右键「在文件管理器中显示」 |
-| 剪贴板 | 
-avigator.clipboard.writeText（带 textarea 兜底） | 复制路径 / Markdown 链接 |
-| 本地路由 | ctx.webServer.register({ kind: 'exact', path, resource }) | 客户端请 Host 拉起 Obsidian |
-| 子进程 | ctx.subprocess.spawn({ argv, cwd, stdio, graceMs }) | 执行系统打开命令 |
+| 剪贴板 | `navigator.clipboard.writeText`（带 textarea 兜底） | 复制路径 / Markdown 链接 |
 
 缺失的能力（比如某个 profile 没有 `remote.session`）只会隐藏对应菜单项，不影响其他功能。
 
@@ -80,8 +77,6 @@ avigator.clipboard.writeText（带 textarea 兜底） | 复制路径 / Markdown 
 - 目录条目只带 `name / type / size`，没有修改时间，所以排序只有名称 / 类型 / 大小三种
 - 面板内预览只读 UTF-8 文本的前 400 行；二进制、图片、压缩包交给预览页签
 - 只作用于会话工作目录内部，不能浏览工作目录之外的路径
-- 「在 Obsidian 中打开」要 **Host 半**参与：客户端 POST 到本地路由 `/x-project-file-picker/obsidian`，Host 用系统命令（Windows 是 `rundll32 url.dll,FileProtocolHandler`）拉起 `obsidian://`。所以升级这一版要重启 DSH；宿主路由不可用时客户端退回页面直接开协议（Electron 下常被拦）
-- 文件夹只能打开所在 vault，不能聚焦子文件夹；vault 靠目标目录或会话工作目录下的 `.obsidian` 认
 - 插件目录若放在同步盘里，同步客户端可能生成 `locale/zh.sync-conflict-*.json`，导致插件列表的显示名报「包元信息错误」（功能不受影响）。处理办法见排错一节
 
 ## 排错
@@ -105,5 +100,8 @@ node tests/host.mjs dev/index.js  # Host 半冒烟测试（桩 ctx，不启动 D
 
 ## 版本
 
-当前版本 **1.6.0**。安装到别的电脑见同目录的 `INSTALL.md`；版本历史见插件库根目录的
+当前版本 **1.6.1**。安装到别的电脑见同目录的 `INSTALL.md`；版本历史见插件库根目录的
 `CHANGELOG.md` 与 `versions/`（不进安装包）。
+
+1.6.1 移除了 1.5.0–1.6.0 的「在 Obsidian 中打开」（宿主路由在 DSH 里只能接 GET/HEAD，
+POST 一律 405，实际从未生效），插件回归纯界面，Host 半保留为空实现作为入口。

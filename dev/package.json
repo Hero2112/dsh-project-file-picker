@@ -2,7 +2,7 @@
   "name": "@local/project-file-picker",
   "version": "1.7.0-dev.0",
   "private": true,
-  "description": "Right-sidebar project file dock: browse, double-click to insert, multi-select, context menu (copy paths, reveal, open in Obsidian through a Host route), inline text preview, project-wide search, favourites with one-click jump, recent list, folder colours and emoji. (dev working copy, never installed)",
+  "description": "Right-sidebar project file dock: browse, double-click to insert, multi-select, context menu (copy paths, reveal), inline text preview, project-wide search, favourites with one-click jump, recent list, folder colours and emoji. (dev working copy, never installed)",
   "type": "module",
   "exports": {
     ".": "./index.js",
