@@ -1,6 +1,7 @@
 # 项目文件坞（Project File Dock）v1.6.1
 
-> **GitHub 仓库**：https://github.com/Hero2112/dsh-project-file-picker （私有）
+> **GitHub 仓库**：https://github.com/Hero2112/dsh-project-file-picker
+> **开源，MIT 许可** · [安装说明](INSTALL.md) · [Releases](https://github.com/Hero2112/dsh-project-file-picker/releases)
 
 DeepSeek Harness Web UI 插件：在**右侧边栏**里浏览当前项目（会话工作目录）的文件，
 双击插入引用、拖进对话框，右键出菜单，面板里直接预览内容；
